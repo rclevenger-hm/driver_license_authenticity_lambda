@@ -11,39 +11,41 @@ Before deploying the Lambda function, ensure you have the following:
 
 ## Deployment
 
+Follow the steps below to deploy the Lambda function and API Gateway:
+
 1. Clone the repository:
 
-```bash
-git clone <repository-url>
-cd driver_license_authenticity_lambda
-```
+   ```bash
+   git clone <repository-url>
+   cd driver_license_authenticity_lambda
+   ```
 
 2. Install dependencies:
 
-```bash
-cd lambda_function
-npm install
-cd ..
-```
+   ```bash
+   cd lambda_function
+   npm install
+   cd ..
+   ```
 
 3. Configure `config.json`:
 
-Edit the `config.json` file with your preferred settings, including the AWS region, Lambda function name, API Gateway name, and API resource path.
+   Edit the `config.json` file with your preferred settings, including the AWS region, Lambda function name, API Gateway name, and API resource path.
 
 4. Build the Lambda function package:
 
-```bash
-cd lambda_function
-zip -r ../lambda_function.zip .
-cd ..
-```
+   ```bash
+   cd lambda_function
+   zip -r ../lambda_function.zip .
+   cd ..
+   ```
 
 5. Deploy the Lambda function and API Gateway:
 
-```bash
-terraform init
-terraform apply
-```
+   ```bash
+   terraform init
+   terraform apply
+   ```
 
 ## Testing
 
@@ -80,6 +82,16 @@ To remove the Lambda function and API Gateway resources, run:
 ```bash
 terraform destroy
 ```
+
+## Contributing
+
+Contributions to this project are welcome! To contribute, follow these steps:
+
+1. Fork this repository.
+2. Create a new branch for your feature or bug fix.
+3. Make your changes and commit them with descriptive commit messages.
+4. Push your changes to your forked repository.
+5. Submit a pull request to this repository.
 
 ## License
 

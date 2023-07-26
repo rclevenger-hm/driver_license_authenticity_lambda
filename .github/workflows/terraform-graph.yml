@@ -1,0 +1,30 @@
+name: Terraform Graph
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  terraform:
+    name: Generate Terraform Graph
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v1
+
+      - name: Initialize Terraform
+        run: terraform init
+
+      - name: Generate Terraform Graph
+        run: terraform graph | dot -Tpng -o infrastructure_graph.png
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v2
+        with:
+          name: infrastructure_graph
+          path: infrastructure_graph.png
