@@ -1,0 +1,7 @@
+{
+    "region": "us-east-1",
+    "lambda_function_name": "driver-license-authenticity-lambda",
+    "api_gateway_name": "driver-license-authenticity-api",
+    "api_resource_path": "validate-license"
+  }
+  
