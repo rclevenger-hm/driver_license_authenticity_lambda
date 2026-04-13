@@ -71,14 +71,17 @@ test('intake handler stores the submission and queues a worker job', async () =>
   assert.equal(response.statusCode, 202);
   assert.equal(payload.status, 'queued');
   assert.equal(payload.submissionId, 'submission-123');
-  assert.equal(calls.length, 3);
+  assert.equal(calls.length, 4);
   assert.equal(calls[0].service, 's3');
   assert.equal(calls[0].input.Bucket, 'intake-bucket');
-  assert.match(calls[0].input.Key, /submissions\/submission-123\.json$/);
-  assert.equal(calls[1].service, 'ddb');
-  assert.equal(calls[1].input.TableName, 'submission-status');
-  assert.equal(calls[2].service, 'sqs');
-  assert.match(calls[2].input.MessageBody, /submission-123/);
+  assert.match(calls[0].input.Key, /uploads\/submission-123\.png$/);
+  assert.equal(calls[1].service, 's3');
+  assert.match(calls[1].input.Key, /submissions\/submission-123\.json$/);
+  assert.equal(calls[2].service, 'ddb');
+  assert.equal(calls[2].input.TableName, 'submission-status');
+  assert.equal(calls[3].service, 'sqs');
+  assert.match(calls[3].input.MessageBody, /submission-123/);
+  assert.match(payload.sourceImageLocation, /uploads\/submission-123\.png$/);
   assert.equal(payload.statusEndpoint, '/submissions/submission-123');
 });
 
@@ -89,12 +92,22 @@ test('worker handler reads a queued submission and writes screening results', as
     async send(command) {
       const name = command.constructor.name;
       if (name === 'GetObjectCommand') {
+        if (command.input.Key === 'uploads/submission-123.png') {
+          return {
+            Body: Buffer.from(SAMPLE_PNG_BASE64, 'base64')
+          };
+        }
+
         return {
           Body: JSON.stringify({
             submissionId: 'submission-123',
             payload: {
-              imageBase64: SAMPLE_PNG_BASE64,
               ocrText: 'DRIVER LICENSE CA DL NUMBER D1234567 DOB 01/02/1990 ISSUED 01/01/2020 EXPIRES 01/01/2028 ADDRESS 123 MAIN ST CLASS C'
+            },
+            sourceImage: {
+              bucket: 'intake-bucket',
+              key: 'uploads/submission-123.png',
+              mimeType: 'image/png'
             }
           })
         };
@@ -130,7 +143,12 @@ test('worker handler reads a queued submission and writes screening results', as
           bucket: 'intake-bucket',
           objectKey: 'submissions/submission-123.json',
           resultKey: 'results/submission-123.json',
-          tableName: 'submission-status'
+          tableName: 'submission-status',
+          sourceImage: {
+            bucket: 'intake-bucket',
+            key: 'uploads/submission-123.png',
+            mimeType: 'image/png'
+          }
         })
       }
     ]

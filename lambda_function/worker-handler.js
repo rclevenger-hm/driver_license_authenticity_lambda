@@ -27,7 +27,19 @@ function createWorkerHandler(options = {}) {
 
         const submissionRaw = await bodyToString(submissionObject.Body);
         const submission = parseJson(submissionRaw, 'Stored submission must be valid JSON.');
-        const normalizedPayload = normalizePayload(submission.payload || submission);
+        const payloadWithBinary = { ...(submission.payload || submission) };
+        const sourceImage = message.sourceImage || submission.sourceImage;
+
+        if (sourceImage && sourceImage.bucket && sourceImage.key) {
+          const imageObject = await s3Client.send(new GetObjectCommand({
+            Bucket: sourceImage.bucket,
+            Key: sourceImage.key
+          }));
+          const imageBytes = await bodyToBuffer(imageObject.Body);
+          payloadWithBinary.imageBase64 = imageBytes.toString('base64');
+        }
+
+        const normalizedPayload = normalizePayload(payloadWithBinary);
         const analysis = analyzeDocument(normalizedPayload);
         const resultKey = message.resultKey || `${defaultResultPrefix}/${message.submissionId}.json`;
 
@@ -135,6 +147,39 @@ async function bodyToString(body) {
   throw new Error('Unsupported S3 body type.');
 }
 
+async function bodyToBuffer(body) {
+  if (body == null) {
+    return Buffer.alloc(0);
+  }
+
+  if (Buffer.isBuffer(body)) {
+    return body;
+  }
+
+  if (typeof body === 'string') {
+    return Buffer.from(body, 'utf8');
+  }
+
+  if (body instanceof Uint8Array) {
+    return Buffer.from(body);
+  }
+
+  if (typeof body.transformToByteArray === 'function') {
+    const bytes = await body.transformToByteArray();
+    return Buffer.from(bytes);
+  }
+
+  if (typeof body[Symbol.asyncIterator] === 'function') {
+    const chunks = [];
+    for await (const chunk of body) {
+      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+    }
+    return Buffer.concat(chunks);
+  }
+
+  throw new Error('Unsupported S3 body type.');
+}
+
 function parseJson(value, errorMessage) {
   try {
     return typeof value === 'string' ? JSON.parse(value) : value;
@@ -144,6 +189,7 @@ function parseJson(value, errorMessage) {
 }
 
 module.exports = {
+  bodyToBuffer,
   bodyToString,
   createWorkerHandler,
   handler: createWorkerHandler()

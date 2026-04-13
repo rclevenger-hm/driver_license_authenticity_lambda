@@ -8,6 +8,7 @@ const { DynamoDBClient } = require('@aws-sdk/client-dynamodb');
 const { DynamoDBDocumentClient, PutCommand } = require('@aws-sdk/lib-dynamodb');
 
 const { jsonResponse, normalizeInvocationEvent } = require('./index');
+const { decodeBase64Document } = require('./storage');
 
 function createIntakeHandler(options = {}) {
   const s3Client = options.s3Client || new S3Client({});
@@ -20,6 +21,7 @@ function createIntakeHandler(options = {}) {
   const bucketName = options.bucketName || process.env.INTAKE_BUCKET_NAME;
   const queueUrl = options.queueUrl || process.env.INTAKE_QUEUE_URL;
   const tableName = options.tableName || process.env.SUBMISSION_TABLE_NAME;
+  const uploadPrefix = options.uploadPrefix || process.env.UPLOAD_PREFIX || 'uploads';
   const submissionPrefix = options.submissionPrefix || process.env.SUBMISSION_PREFIX || 'submissions';
   const resultPrefix = options.resultPrefix || process.env.RESULT_PREFIX || 'results';
 
@@ -34,11 +36,34 @@ function createIntakeHandler(options = {}) {
       const submittedAt = now();
       const objectKey = `${submissionPrefix}/${submissionId}.json`;
       const resultKey = `${resultPrefix}/${submissionId}.json`;
+      let sourceImage = null;
+
+      if (payload.imageBase64) {
+        const decodedImage = decodeBase64Document(payload.imageBase64);
+        const uploadKey = `${uploadPrefix}/${submissionId}.${decodedImage.extension}`;
+
+        await s3Client.send(new PutObjectCommand({
+          Bucket: bucketName,
+          Key: uploadKey,
+          Body: decodedImage.buffer,
+          ContentType: decodedImage.mimeType
+        }));
+
+        sourceImage = {
+          bucket: bucketName,
+          key: uploadKey,
+          mimeType: decodedImage.mimeType
+        };
+      }
 
       const submissionRecord = {
         submissionId,
         submittedAt,
-        payload
+        payload: {
+          ...payload,
+          imageBase64: undefined
+        },
+        sourceImage
       };
 
       await s3Client.send(new PutObjectCommand({
@@ -57,6 +82,7 @@ function createIntakeHandler(options = {}) {
           queue: 'screening',
           submissionBucket: bucketName,
           submissionKey: objectKey,
+          sourceImageKey: sourceImage ? sourceImage.key : null,
           resultKey,
           lastUpdatedAt: submittedAt
         }
@@ -69,7 +95,8 @@ function createIntakeHandler(options = {}) {
           bucket: bucketName,
           objectKey,
           resultKey,
-          tableName
+          tableName,
+          sourceImage
         })
       }));
 
@@ -80,6 +107,7 @@ function createIntakeHandler(options = {}) {
         queue: 'screening',
         submissionLocation: `s3://${bucketName}/${objectKey}`,
         resultLocation: `s3://${bucketName}/${resultKey}`,
+        sourceImageLocation: sourceImage ? `s3://${bucketName}/${sourceImage.key}` : null,
         statusEndpoint: `/submissions/${submissionId}`
       });
     } catch (error) {

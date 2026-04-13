@@ -4,6 +4,8 @@ This project is now structured as an asynchronous intake system for driver's lic
 
 Instead of trying to do everything in a single request, the API accepts a submission, stores it in S3, places a job on SQS, and lets a worker Lambda process the document in the background. That gives the project a much more production-friendly shape for retries, throughput spikes, and longer-running enrichment later.
 
+When an image is included, the intake flow stores the original upload as a binary object in S3 and keeps the submission JSON as metadata plus references.
+
 ## Architecture
 
 ```text
