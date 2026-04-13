@@ -237,6 +237,66 @@ test('worker handler can enrich missing OCR text from the OCR extractor', async 
   assert.ok(storedResult.analysis.score > 0);
 });
 
+test('worker handler parses barcode data and folds it into screening', async () => {
+  const writes = [];
+  const handler = createWorkerHandler({
+    s3Client: {
+      async send(command) {
+        const name = command.constructor.name;
+        if (name === 'GetObjectCommand') {
+          return {
+            Body: JSON.stringify({
+              submissionId: 'submission-barcode',
+              payload: {
+                barcodeData: 'ANSI 636026080102DL00410288ZV03290015DLDAQD1234567\nDCSSMITH\nDACJANE\nDAG123 MAIN ST\nDAIAUSTIN\nDAJTX\nDAK73301\nDBB01021990\nDBD01012020\nDBA01012028\nDCAC'
+              }
+            })
+          };
+        }
+
+        if (name === 'PutObjectCommand') {
+          writes.push(command.input);
+          return {};
+        }
+
+        throw new Error(`Unexpected command: ${name}`);
+      }
+    },
+    documentClient: {
+      async send() {
+        return {};
+      }
+    },
+    ocrExtractor: {
+      async extractText() {
+        return { text: '', source: 'disabled' };
+      }
+    },
+    now: () => '2026-04-12T12:05:00.000Z'
+  });
+
+  const response = await handler({
+    Records: [
+      {
+        messageId: 'msg-barcode',
+        body: JSON.stringify({
+          submissionId: 'submission-barcode',
+          bucket: 'intake-bucket',
+          objectKey: 'submissions/submission-barcode.json',
+          resultKey: 'results/submission-barcode.json',
+          tableName: 'submission-status'
+        })
+      }
+    ]
+  });
+
+  assert.deepEqual(response, { batchItemFailures: [] });
+  const storedResult = JSON.parse(writes[0].Body);
+  assert.equal(storedResult.barcode.format, 'aamva-pdf417');
+  assert.equal(storedResult.barcode.fields.state, 'TX');
+  assert.ok(storedResult.analysis.score > 0);
+});
+
 test('worker handler reports failed queue items for retry', async () => {
   const statusUpdates = [];
   const handler = createWorkerHandler({

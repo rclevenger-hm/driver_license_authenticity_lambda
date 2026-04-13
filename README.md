@@ -67,6 +67,8 @@ Supported fields:
 - `ocrText`
 - `text`
 - `extractedText`
+- `barcodeData`
+- `pdf417Data`
 - `metadata.stateCode`
 
 At least one of `imageBase64` or `ocrText` is required.
@@ -90,6 +92,7 @@ The worker uses the shared screening engine to score document plausibility based
 - Resolution and ID-card-like aspect ratio
 - Suspiciously tiny payload size
 - License-related OCR keywords
+- Parsed AAMVA or PDF417 barcode payloads when available
 - Presence of expected document fields
 - U.S. state detection
 - Basic date chronology checks

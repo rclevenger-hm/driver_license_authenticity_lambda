@@ -4,6 +4,7 @@ const { S3Client, GetObjectCommand, PutObjectCommand } = require('@aws-sdk/clien
 const { DynamoDBClient } = require('@aws-sdk/client-dynamodb');
 const { DynamoDBDocumentClient, UpdateCommand } = require('@aws-sdk/lib-dynamodb');
 
+const { parseAamvaBarcode } = require('./barcode');
 const { analyzeDocument, normalizePayload } = require('./screening');
 const { createOcrExtractor } = require('./ocr');
 
@@ -34,6 +35,7 @@ function createWorkerHandler(options = {}) {
         const submission = parseJson(submissionRaw, 'Stored submission must be valid JSON.');
         const payloadWithBinary = { ...(submission.payload || submission) };
         const sourceImage = message.sourceImage || submission.sourceImage;
+        const parsedBarcode = parseAamvaBarcode(payloadWithBinary.barcodeData);
         let extractedOcr = null;
 
         if (sourceImage && sourceImage.bucket && sourceImage.key) {
@@ -50,6 +52,18 @@ function createWorkerHandler(options = {}) {
               payloadWithBinary.ocrText = extractedOcr.text;
             }
           }
+        }
+
+        if (parsedBarcode && parsedBarcode.screeningText) {
+          payloadWithBinary.ocrText = payloadWithBinary.ocrText
+            ? `${payloadWithBinary.ocrText} ${parsedBarcode.screeningText}`
+            : parsedBarcode.screeningText;
+          payloadWithBinary.metadata = {
+            ...(payloadWithBinary.metadata || {}),
+            stateCode: payloadWithBinary.metadata && payloadWithBinary.metadata.stateCode
+              ? payloadWithBinary.metadata.stateCode
+              : parsedBarcode.fields.state || null
+          };
         }
 
         const normalizedPayload = normalizePayload(payloadWithBinary);
@@ -71,6 +85,7 @@ function createWorkerHandler(options = {}) {
               source: extractedOcr.source,
               extractedTextLength: extractedOcr.text.length
             } : null,
+            barcode: parsedBarcode,
             analysis
           }),
           ContentType: 'application/json'
@@ -81,7 +96,7 @@ function createWorkerHandler(options = {}) {
           await documentClient.send(new UpdateCommand({
             TableName: message.tableName || process.env.SUBMISSION_TABLE_NAME,
             Key: { submissionId: message.submissionId },
-            UpdateExpression: 'SET #status = :status, processedAt = :processedAt, lastUpdatedAt = :lastUpdatedAt, resultKey = :resultKey, analysisSummary = :analysisSummary, analysisScore = :analysisScore, reviewStatus = :reviewStatus, ocrSource = :ocrSource',
+            UpdateExpression: 'SET #status = :status, processedAt = :processedAt, lastUpdatedAt = :lastUpdatedAt, resultKey = :resultKey, analysisSummary = :analysisSummary, analysisScore = :analysisScore, reviewStatus = :reviewStatus, ocrSource = :ocrSource, barcodeFormat = :barcodeFormat',
             ExpressionAttributeNames: {
               '#status': 'status'
             },
@@ -93,7 +108,8 @@ function createWorkerHandler(options = {}) {
               ':analysisSummary': analysis.summary,
               ':analysisScore': analysis.score,
               ':reviewStatus': analysis.status,
-              ':ocrSource': extractedOcr ? extractedOcr.source : 'provided'
+              ':ocrSource': extractedOcr ? extractedOcr.source : 'provided',
+              ':barcodeFormat': parsedBarcode ? parsedBarcode.format : null
             }
           }));
         }

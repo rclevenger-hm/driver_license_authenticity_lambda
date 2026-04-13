@@ -59,15 +59,17 @@ function normalizePayload(payload) {
 
   const imageBase64 = firstString(payload.imageBase64, payload.image, payload.documentImageBase64);
   const ocrText = firstString(payload.ocrText, payload.text, payload.extractedText);
+  const barcodeData = firstString(payload.barcodeData, payload.pdf417Data);
   const metadata = payload.metadata && typeof payload.metadata === 'object' ? payload.metadata : {};
 
-  if (!imageBase64 && !ocrText) {
-    throw badRequest('At least one of `imageBase64` or `ocrText` is required.');
+  if (!imageBase64 && !ocrText && !barcodeData) {
+    throw badRequest('At least one of `imageBase64`, `ocrText`, or `barcodeData` is required.');
   }
 
   return {
     imageBase64,
     ocrText,
+    barcodeData,
     metadata
   };
 }
