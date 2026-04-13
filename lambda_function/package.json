@@ -1,0 +1,14 @@
+{
+  "name": "driver-license-authenticity-lambda",
+  "version": "1.0.0",
+  "description": "AWS Lambda and local server for driver license plausibility screening.",
+  "main": "index.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "license": "MIT"
+}

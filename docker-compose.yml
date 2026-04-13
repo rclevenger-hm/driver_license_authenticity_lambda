@@ -1,4 +1,3 @@
-version: "3"
 services:
   lambda:
     build:
@@ -7,6 +6,6 @@ services:
     ports:
       - "3000:3000"
     environment:
-      - PORT=3000
+      PORT: 3000
     volumes:
-      - ./lambda_function:/app/lambda_function
+      - ./lambda_function:/app

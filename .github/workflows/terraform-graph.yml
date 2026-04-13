@@ -15,16 +15,18 @@ jobs:
         uses: actions/checkout@v2
 
       - name: Set up Terraform
-        uses: hashicorp/setup-terraform@v1
+        uses: hashicorp/setup-terraform@v3
 
       - name: Initialize Terraform
+        working-directory: terraform
         run: terraform init
 
       - name: Generate Terraform Graph
+        working-directory: terraform
         run: terraform graph | dot -Tpng -o infrastructure_graph.png
 
       - name: Upload Artifact
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v4
         with:
           name: infrastructure_graph
-          path: infrastructure_graph.png
+          path: terraform/infrastructure_graph.png
