@@ -9,6 +9,15 @@
   "bucket_name": "driver-license-authenticity-intake",
   "queue_name": "driver-license-screening-jobs",
   "submission_table_name": "driver-license-submissions",
-  "enable_textract_ocr": true
+  "enable_textract_ocr": true,
+  "name_suffix": "dev",
+  "log_retention_days": 14,
+  "submission_retention_days": 30,
+  "result_retention_days": 180,
+  "tags": {
+    "project": "driver-license-authenticity",
+    "managed-by": "terraform",
+    "environment": "dev"
+  }
 }
   

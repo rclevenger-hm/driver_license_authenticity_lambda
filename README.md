@@ -219,6 +219,7 @@ Terraform provisions:
 - IAM roles and policies for each Lambda
 
 Terraform also runs `npm ci --omit=dev` in `lambda_function/` before packaging so the Lambda bundle includes the AWS SDK clients it depends on.
+The stack now supports configurable name suffixes, resource tags, S3 retention rules, and CloudWatch log retention settings through `terraform/config.json`.
 
 Before deploying:
 

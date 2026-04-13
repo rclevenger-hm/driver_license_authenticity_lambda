@@ -15,20 +15,26 @@ terraform {
 
 locals {
   config = jsondecode(file("${path.module}/config.json"))
+  name_suffix = trimspace(try(local.config.name_suffix, ""))
+  suffix      = local.name_suffix != "" ? "-${local.name_suffix}" : ""
 
   region                      = local.config.region
-  intake_lambda_function_name = local.config.intake_lambda_function_name
-  worker_lambda_function_name = local.config.worker_lambda_function_name
-  status_lambda_function_name = local.config.status_lambda_function_name
-  api_gateway_name            = local.config.api_gateway_name
+  intake_lambda_function_name = "${local.config.intake_lambda_function_name}${local.suffix}"
+  worker_lambda_function_name = "${local.config.worker_lambda_function_name}${local.suffix}"
+  status_lambda_function_name = "${local.config.status_lambda_function_name}${local.suffix}"
+  api_gateway_name            = "${local.config.api_gateway_name}${local.suffix}"
   api_resource_path           = local.config.api_resource_path
   stage_name                  = try(local.config.stage_name, "prod")
-  bucket_name                 = local.config.bucket_name
-  queue_name                  = local.config.queue_name
-  submission_table_name       = local.config.submission_table_name
+  bucket_name                 = "${local.config.bucket_name}${local.suffix}"
+  queue_name                  = "${local.config.queue_name}${local.suffix}"
+  submission_table_name       = "${local.config.submission_table_name}${local.suffix}"
   enable_textract_ocr         = try(local.config.enable_textract_ocr, true)
+  log_retention_days          = try(local.config.log_retention_days, 14)
+  submission_retention_days   = try(local.config.submission_retention_days, 30)
+  result_retention_days       = try(local.config.result_retention_days, 180)
   submission_prefix           = "submissions"
   result_prefix               = "results"
+  common_tags                 = try(local.config.tags, {})
 }
 
 provider "aws" {
@@ -57,6 +63,7 @@ data "archive_file" "lambda_zip" {
 
 resource "aws_s3_bucket" "intake_bucket" {
   bucket = local.bucket_name
+  tags   = local.common_tags
 }
 
 resource "aws_s3_bucket_versioning" "intake_bucket_versioning" {
@@ -85,15 +92,47 @@ resource "aws_s3_bucket_public_access_block" "intake_bucket_access" {
   restrict_public_buckets = true
 }
 
+resource "aws_s3_bucket_lifecycle_configuration" "intake_bucket_lifecycle" {
+  bucket = aws_s3_bucket.intake_bucket.id
+
+  rule {
+    id     = "expire-submissions"
+    status = "Enabled"
+
+    filter {
+      prefix = "${local.submission_prefix}/"
+    }
+
+    expiration {
+      days = local.submission_retention_days
+    }
+  }
+
+  rule {
+    id     = "expire-results"
+    status = "Enabled"
+
+    filter {
+      prefix = "${local.result_prefix}/"
+    }
+
+    expiration {
+      days = local.result_retention_days
+    }
+  }
+}
+
 resource "aws_sqs_queue" "screening_dlq" {
   name                      = "${local.queue_name}-dlq"
   message_retention_seconds = 1209600
+  tags                      = local.common_tags
 }
 
 resource "aws_sqs_queue" "screening_jobs" {
   name                       = local.queue_name
   visibility_timeout_seconds = 120
   message_retention_seconds  = 345600
+  tags                       = local.common_tags
 
   redrive_policy = jsonencode({
     deadLetterTargetArn = aws_sqs_queue.screening_dlq.arn
@@ -105,6 +144,7 @@ resource "aws_dynamodb_table" "submissions" {
   name         = local.submission_table_name
   billing_mode = "PAY_PER_REQUEST"
   hash_key     = "submissionId"
+  tags         = local.common_tags
 
   attribute {
     name = "submissionId"
@@ -339,6 +379,8 @@ resource "aws_lambda_function" "intake" {
       RESULT_PREFIX      = local.result_prefix
     }
   }
+
+  tags = local.common_tags
 }
 
 resource "aws_lambda_function" "worker" {
@@ -359,6 +401,8 @@ resource "aws_lambda_function" "worker" {
       ENABLE_TEXTRACT_OCR   = local.enable_textract_ocr ? "true" : "false"
     }
   }
+
+  tags = local.common_tags
 }
 
 resource "aws_lambda_function" "status" {
@@ -377,6 +421,26 @@ resource "aws_lambda_function" "status" {
       SUBMISSION_TABLE_NAME = aws_dynamodb_table.submissions.name
     }
   }
+
+  tags = local.common_tags
+}
+
+resource "aws_cloudwatch_log_group" "intake" {
+  name              = "/aws/lambda/${aws_lambda_function.intake.function_name}"
+  retention_in_days = local.log_retention_days
+  tags              = local.common_tags
+}
+
+resource "aws_cloudwatch_log_group" "worker" {
+  name              = "/aws/lambda/${aws_lambda_function.worker.function_name}"
+  retention_in_days = local.log_retention_days
+  tags              = local.common_tags
+}
+
+resource "aws_cloudwatch_log_group" "status" {
+  name              = "/aws/lambda/${aws_lambda_function.status.function_name}"
+  retention_in_days = local.log_retention_days
+  tags              = local.common_tags
 }
 
 resource "aws_lambda_event_source_mapping" "worker_queue_mapping" {
@@ -388,6 +452,7 @@ resource "aws_lambda_event_source_mapping" "worker_queue_mapping" {
 resource "aws_api_gateway_rest_api" "driver_license_api" {
   name        = local.api_gateway_name
   description = "API Gateway for driver license intake and async screening"
+  tags        = local.common_tags
 }
 
 resource "aws_api_gateway_resource" "driver_license_api_resource" {
@@ -479,4 +544,5 @@ resource "aws_api_gateway_stage" "driver_license_api_stage" {
   deployment_id = aws_api_gateway_deployment.driver_license_api_deployment.id
   rest_api_id   = aws_api_gateway_rest_api.driver_license_api.id
   stage_name    = local.stage_name
+  tags          = local.common_tags
 }
