@@ -24,7 +24,7 @@ Client
 Receives API requests, validates the payload, writes the submission to S3, and enqueues a screening job.
 
 `worker-handler.js`
-Consumes SQS messages, loads the stored submission from S3, runs the screening engine, and writes the result back to S3.
+Consumes SQS messages, loads the stored submission from S3, optionally runs Textract OCR when text is missing, runs the screening engine, and writes the result back to S3.
 
 `screening.js`
 Shared screening engine that scores OCR text and image metadata for plausibility.

@@ -26,6 +26,7 @@ locals {
   bucket_name                 = local.config.bucket_name
   queue_name                  = local.config.queue_name
   submission_table_name       = local.config.submission_table_name
+  enable_textract_ocr         = try(local.config.enable_textract_ocr, true)
   submission_prefix           = "submissions"
   result_prefix               = "results"
 }
@@ -240,6 +241,13 @@ resource "aws_iam_policy" "worker_pipeline_access" {
           "dynamodb:UpdateItem"
         ]
         Resource = aws_dynamodb_table.submissions.arn
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "textract:DetectDocumentText"
+        ]
+        Resource = "*"
       }
     ]
   })
@@ -314,6 +322,7 @@ resource "aws_lambda_function" "worker" {
       NODE_ENV              = "production"
       RESULT_PREFIX         = local.result_prefix
       SUBMISSION_TABLE_NAME = aws_dynamodb_table.submissions.name
+      ENABLE_TEXTRACT_OCR   = local.enable_textract_ocr ? "true" : "false"
     }
   }
 }

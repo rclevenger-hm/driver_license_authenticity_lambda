@@ -8,6 +8,7 @@
   "stage_name": "prod",
   "bucket_name": "driver-license-authenticity-intake",
   "queue_name": "driver-license-screening-jobs",
-  "submission_table_name": "driver-license-submissions"
+  "submission_table_name": "driver-license-submissions",
+  "enable_textract_ocr": true
 }
   

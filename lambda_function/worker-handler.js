@@ -5,12 +5,17 @@ const { DynamoDBClient } = require('@aws-sdk/client-dynamodb');
 const { DynamoDBDocumentClient, UpdateCommand } = require('@aws-sdk/lib-dynamodb');
 
 const { analyzeDocument, normalizePayload } = require('./screening');
+const { createOcrExtractor } = require('./ocr');
 
 function createWorkerHandler(options = {}) {
   const s3Client = options.s3Client || new S3Client({});
   const documentClient = options.documentClient || DynamoDBDocumentClient.from(
     options.dynamoClient || new DynamoDBClient({})
   );
+  const ocrExtractor = options.ocrExtractor || createOcrExtractor({
+    textractClient: options.textractClient,
+    enabled: options.ocrEnabled
+  });
   const now = options.now || (() => new Date().toISOString());
   const defaultResultPrefix = options.resultPrefix || process.env.RESULT_PREFIX || 'results';
 
@@ -29,6 +34,7 @@ function createWorkerHandler(options = {}) {
         const submission = parseJson(submissionRaw, 'Stored submission must be valid JSON.');
         const payloadWithBinary = { ...(submission.payload || submission) };
         const sourceImage = message.sourceImage || submission.sourceImage;
+        let extractedOcr = null;
 
         if (sourceImage && sourceImage.bucket && sourceImage.key) {
           const imageObject = await s3Client.send(new GetObjectCommand({
@@ -37,6 +43,13 @@ function createWorkerHandler(options = {}) {
           }));
           const imageBytes = await bodyToBuffer(imageObject.Body);
           payloadWithBinary.imageBase64 = imageBytes.toString('base64');
+
+          if (!payloadWithBinary.ocrText) {
+            extractedOcr = await ocrExtractor.extractText(imageBytes);
+            if (extractedOcr.text) {
+              payloadWithBinary.ocrText = extractedOcr.text;
+            }
+          }
         }
 
         const normalizedPayload = normalizePayload(payloadWithBinary);
@@ -54,6 +67,10 @@ function createWorkerHandler(options = {}) {
               bucket: message.bucket,
               objectKey: message.objectKey
             },
+            ocr: extractedOcr ? {
+              source: extractedOcr.source,
+              extractedTextLength: extractedOcr.text.length
+            } : null,
             analysis
           }),
           ContentType: 'application/json'
@@ -64,7 +81,7 @@ function createWorkerHandler(options = {}) {
           await documentClient.send(new UpdateCommand({
             TableName: message.tableName || process.env.SUBMISSION_TABLE_NAME,
             Key: { submissionId: message.submissionId },
-            UpdateExpression: 'SET #status = :status, processedAt = :processedAt, lastUpdatedAt = :lastUpdatedAt, resultKey = :resultKey, analysisSummary = :analysisSummary, analysisScore = :analysisScore, reviewStatus = :reviewStatus',
+            UpdateExpression: 'SET #status = :status, processedAt = :processedAt, lastUpdatedAt = :lastUpdatedAt, resultKey = :resultKey, analysisSummary = :analysisSummary, analysisScore = :analysisScore, reviewStatus = :reviewStatus, ocrSource = :ocrSource',
             ExpressionAttributeNames: {
               '#status': 'status'
             },
@@ -75,7 +92,8 @@ function createWorkerHandler(options = {}) {
               ':resultKey': resultKey,
               ':analysisSummary': analysis.summary,
               ':analysisScore': analysis.score,
-              ':reviewStatus': analysis.status
+              ':reviewStatus': analysis.status,
+              ':ocrSource': extractedOcr ? extractedOcr.source : 'provided'
             }
           }));
         }

@@ -166,6 +166,77 @@ test('worker handler reads a queued submission and writes screening results', as
   assert.equal(storedResult.analysis.status, 'pass');
 });
 
+test('worker handler can enrich missing OCR text from the OCR extractor', async () => {
+  const writes = [];
+  const handler = createWorkerHandler({
+    s3Client: {
+      async send(command) {
+        const name = command.constructor.name;
+        if (name === 'GetObjectCommand') {
+          if (command.input.Key === 'uploads/submission-ocr.png') {
+            return {
+              Body: Buffer.from(SAMPLE_PNG_BASE64, 'base64')
+            };
+          }
+
+          return {
+            Body: JSON.stringify({
+              submissionId: 'submission-ocr',
+              payload: {},
+              sourceImage: {
+                bucket: 'intake-bucket',
+                key: 'uploads/submission-ocr.png',
+                mimeType: 'image/png'
+              }
+            })
+          };
+        }
+
+        if (name === 'PutObjectCommand') {
+          writes.push(command.input);
+          return {};
+        }
+
+        throw new Error(`Unexpected command: ${name}`);
+      }
+    },
+    documentClient: {
+      async send() {
+        return {};
+      }
+    },
+    ocrExtractor: {
+      async extractText() {
+        return {
+          text: 'DRIVER LICENSE TX DOB 01/02/1990 ADDRESS 123 MAIN ST',
+          source: 'textract'
+        };
+      }
+    },
+    now: () => '2026-04-12T12:05:00.000Z'
+  });
+
+  const response = await handler({
+    Records: [
+      {
+        messageId: 'msg-ocr',
+        body: JSON.stringify({
+          submissionId: 'submission-ocr',
+          bucket: 'intake-bucket',
+          objectKey: 'submissions/submission-ocr.json',
+          resultKey: 'results/submission-ocr.json',
+          tableName: 'submission-status'
+        })
+      }
+    ]
+  });
+
+  assert.deepEqual(response, { batchItemFailures: [] });
+  const storedResult = JSON.parse(writes[0].Body);
+  assert.equal(storedResult.ocr.source, 'textract');
+  assert.ok(storedResult.analysis.score > 0);
+});
+
 test('worker handler reports failed queue items for retry', async () => {
   const statusUpdates = [];
   const handler = createWorkerHandler({
