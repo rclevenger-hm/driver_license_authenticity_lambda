@@ -1,11 +1,16 @@
 'use strict';
 
 const { S3Client, GetObjectCommand, PutObjectCommand } = require('@aws-sdk/client-s3');
+const { DynamoDBClient } = require('@aws-sdk/client-dynamodb');
+const { DynamoDBDocumentClient, UpdateCommand } = require('@aws-sdk/lib-dynamodb');
 
 const { analyzeDocument, normalizePayload } = require('./screening');
 
 function createWorkerHandler(options = {}) {
   const s3Client = options.s3Client || new S3Client({});
+  const documentClient = options.documentClient || DynamoDBDocumentClient.from(
+    options.dynamoClient || new DynamoDBClient({})
+  );
   const now = options.now || (() => new Date().toISOString());
   const defaultResultPrefix = options.resultPrefix || process.env.RESULT_PREFIX || 'results';
 
@@ -41,9 +46,53 @@ function createWorkerHandler(options = {}) {
           }),
           ContentType: 'application/json'
         }));
+
+        if (message.tableName || process.env.SUBMISSION_TABLE_NAME) {
+          const processedAt = now();
+          await documentClient.send(new UpdateCommand({
+            TableName: message.tableName || process.env.SUBMISSION_TABLE_NAME,
+            Key: { submissionId: message.submissionId },
+            UpdateExpression: 'SET #status = :status, processedAt = :processedAt, lastUpdatedAt = :lastUpdatedAt, resultKey = :resultKey, analysisSummary = :analysisSummary, analysisScore = :analysisScore, reviewStatus = :reviewStatus',
+            ExpressionAttributeNames: {
+              '#status': 'status'
+            },
+            ExpressionAttributeValues: {
+              ':status': 'completed',
+              ':processedAt': processedAt,
+              ':lastUpdatedAt': processedAt,
+              ':resultKey': resultKey,
+              ':analysisSummary': analysis.summary,
+              ':analysisScore': analysis.score,
+              ':reviewStatus': analysis.status
+            }
+          }));
+        }
       } catch (error) {
+        const messageId = record.messageId || record.messageID || 'unknown';
+        try {
+          const message = parseJson(record.body, 'Queue record body must be valid JSON.');
+          if (message.submissionId && (message.tableName || process.env.SUBMISSION_TABLE_NAME)) {
+            const failedAt = now();
+            await documentClient.send(new UpdateCommand({
+              TableName: message.tableName || process.env.SUBMISSION_TABLE_NAME,
+              Key: { submissionId: message.submissionId },
+              UpdateExpression: 'SET #status = :status, lastUpdatedAt = :lastUpdatedAt, errorMessage = :errorMessage',
+              ExpressionAttributeNames: {
+                '#status': 'status'
+              },
+              ExpressionAttributeValues: {
+                ':status': 'failed',
+                ':lastUpdatedAt': failedAt,
+                ':errorMessage': error.message
+              }
+            }));
+          }
+        } catch (statusError) {
+          // Keep the original failure path intact if status persistence also fails.
+        }
+
         failures.push({
-          itemIdentifier: record.messageId || record.messageID || 'unknown'
+          itemIdentifier: messageId
         });
       }
     }

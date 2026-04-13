@@ -5,6 +5,7 @@ const assert = require('node:assert/strict');
 
 const { handler: screeningHandler, inspectImage, inspectOcrText } = require('./index');
 const { createIntakeHandler } = require('./intake-handler');
+const { createStatusHandler } = require('./status-handler');
 const { createWorkerHandler } = require('./worker-handler');
 
 const SAMPLE_PNG_BASE64 =
@@ -41,11 +42,19 @@ test('intake handler stores the submission and queues a worker job', async () =>
       return {};
     }
   };
+  const fakeDoc = {
+    async send(command) {
+      calls.push({ service: 'ddb', input: command.input });
+      return {};
+    }
+  };
   const handler = createIntakeHandler({
     s3Client: fakeS3,
     sqsClient: fakeSqs,
+    documentClient: fakeDoc,
     bucketName: 'intake-bucket',
     queueUrl: 'https://sqs.us-east-1.amazonaws.com/123/jobs',
+    tableName: 'submission-status',
     createId: () => 'submission-123',
     now: () => '2026-04-12T12:00:00.000Z'
   });
@@ -62,16 +71,20 @@ test('intake handler stores the submission and queues a worker job', async () =>
   assert.equal(response.statusCode, 202);
   assert.equal(payload.status, 'queued');
   assert.equal(payload.submissionId, 'submission-123');
-  assert.equal(calls.length, 2);
+  assert.equal(calls.length, 3);
   assert.equal(calls[0].service, 's3');
   assert.equal(calls[0].input.Bucket, 'intake-bucket');
   assert.match(calls[0].input.Key, /submissions\/submission-123\.json$/);
-  assert.equal(calls[1].service, 'sqs');
-  assert.match(calls[1].input.MessageBody, /submission-123/);
+  assert.equal(calls[1].service, 'ddb');
+  assert.equal(calls[1].input.TableName, 'submission-status');
+  assert.equal(calls[2].service, 'sqs');
+  assert.match(calls[2].input.MessageBody, /submission-123/);
+  assert.equal(payload.statusEndpoint, '/submissions/submission-123');
 });
 
 test('worker handler reads a queued submission and writes screening results', async () => {
   const writes = [];
+  const statusUpdates = [];
   const fakeS3 = {
     async send(command) {
       const name = command.constructor.name;
@@ -95,9 +108,16 @@ test('worker handler reads a queued submission and writes screening results', as
       throw new Error(`Unexpected command: ${name}`);
     }
   };
+  const fakeDoc = {
+    async send(command) {
+      statusUpdates.push(command.input);
+      return {};
+    }
+  };
 
   const handler = createWorkerHandler({
     s3Client: fakeS3,
+    documentClient: fakeDoc,
     now: () => '2026-04-12T12:05:00.000Z'
   });
 
@@ -109,7 +129,8 @@ test('worker handler reads a queued submission and writes screening results', as
           submissionId: 'submission-123',
           bucket: 'intake-bucket',
           objectKey: 'submissions/submission-123.json',
-          resultKey: 'results/submission-123.json'
+          resultKey: 'results/submission-123.json',
+          tableName: 'submission-status'
         })
       }
     ]
@@ -119,6 +140,8 @@ test('worker handler reads a queued submission and writes screening results', as
   assert.equal(writes.length, 1);
   assert.equal(writes[0].Bucket, 'intake-bucket');
   assert.equal(writes[0].Key, 'results/submission-123.json');
+  assert.equal(statusUpdates.length, 1);
+  assert.equal(statusUpdates[0].TableName, 'submission-status');
 
   const storedResult = JSON.parse(writes[0].Body);
   assert.equal(storedResult.status, 'completed');
@@ -126,10 +149,17 @@ test('worker handler reads a queued submission and writes screening results', as
 });
 
 test('worker handler reports failed queue items for retry', async () => {
+  const statusUpdates = [];
   const handler = createWorkerHandler({
     s3Client: {
       async send() {
         throw new Error('boom');
+      }
+    },
+    documentClient: {
+      async send(command) {
+        statusUpdates.push(command.input);
+        return {};
       }
     }
   });
@@ -141,7 +171,8 @@ test('worker handler reports failed queue items for retry', async () => {
         body: JSON.stringify({
           submissionId: 'bad',
           bucket: 'intake-bucket',
-          objectKey: 'submissions/bad.json'
+          objectKey: 'submissions/bad.json',
+          tableName: 'submission-status'
         })
       }
     ]
@@ -150,6 +181,36 @@ test('worker handler reports failed queue items for retry', async () => {
   assert.deepEqual(response, {
     batchItemFailures: [{ itemIdentifier: 'msg-2' }]
   });
+  assert.equal(statusUpdates.length, 1);
+  assert.equal(statusUpdates[0].TableName, 'submission-status');
+});
+
+test('status handler returns stored submission state', async () => {
+  const handler = createStatusHandler({
+    tableName: 'submission-status',
+    documentClient: {
+      async send() {
+        return {
+          Item: {
+            submissionId: 'submission-123',
+            status: 'completed',
+            reviewStatus: 'pass'
+          }
+        };
+      }
+    }
+  });
+
+  const response = await handler({
+    pathParameters: {
+      submissionId: 'submission-123'
+    }
+  });
+
+  const payload = JSON.parse(response.body);
+  assert.equal(response.statusCode, 200);
+  assert.equal(payload.submissionId, 'submission-123');
+  assert.equal(payload.status, 'completed');
 });
 
 test('extracts PNG dimensions correctly', () => {

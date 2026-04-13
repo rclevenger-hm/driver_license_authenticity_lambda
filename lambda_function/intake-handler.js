@@ -4,23 +4,29 @@ const { randomUUID } = require('node:crypto');
 
 const { S3Client, PutObjectCommand } = require('@aws-sdk/client-s3');
 const { SQSClient, SendMessageCommand } = require('@aws-sdk/client-sqs');
+const { DynamoDBClient } = require('@aws-sdk/client-dynamodb');
+const { DynamoDBDocumentClient, PutCommand } = require('@aws-sdk/lib-dynamodb');
 
 const { jsonResponse, normalizeInvocationEvent } = require('./index');
 
 function createIntakeHandler(options = {}) {
   const s3Client = options.s3Client || new S3Client({});
   const sqsClient = options.sqsClient || new SQSClient({});
+  const documentClient = options.documentClient || DynamoDBDocumentClient.from(
+    options.dynamoClient || new DynamoDBClient({})
+  );
   const now = options.now || (() => new Date().toISOString());
   const createId = options.createId || randomUUID;
   const bucketName = options.bucketName || process.env.INTAKE_BUCKET_NAME;
   const queueUrl = options.queueUrl || process.env.INTAKE_QUEUE_URL;
+  const tableName = options.tableName || process.env.SUBMISSION_TABLE_NAME;
   const submissionPrefix = options.submissionPrefix || process.env.SUBMISSION_PREFIX || 'submissions';
   const resultPrefix = options.resultPrefix || process.env.RESULT_PREFIX || 'results';
 
   return async function handler(event = {}) {
     try {
-      if (!bucketName || !queueUrl) {
-        throw configurationError('INTAKE_BUCKET_NAME and INTAKE_QUEUE_URL must be configured.');
+      if (!bucketName || !queueUrl || !tableName) {
+        throw configurationError('INTAKE_BUCKET_NAME, INTAKE_QUEUE_URL, and SUBMISSION_TABLE_NAME must be configured.');
       }
 
       const payload = normalizeInvocationEvent(event);
@@ -42,13 +48,28 @@ function createIntakeHandler(options = {}) {
         ContentType: 'application/json'
       }));
 
+      await documentClient.send(new PutCommand({
+        TableName: tableName,
+        Item: {
+          submissionId,
+          status: 'queued',
+          submittedAt,
+          queue: 'screening',
+          submissionBucket: bucketName,
+          submissionKey: objectKey,
+          resultKey,
+          lastUpdatedAt: submittedAt
+        }
+      }));
+
       await sqsClient.send(new SendMessageCommand({
         QueueUrl: queueUrl,
         MessageBody: JSON.stringify({
           submissionId,
           bucket: bucketName,
           objectKey,
-          resultKey
+          resultKey,
+          tableName
         })
       }));
 
@@ -58,7 +79,8 @@ function createIntakeHandler(options = {}) {
         submittedAt,
         queue: 'screening',
         submissionLocation: `s3://${bucketName}/${objectKey}`,
-        resultLocation: `s3://${bucketName}/${resultKey}`
+        resultLocation: `s3://${bucketName}/${resultKey}`,
+        statusEndpoint: `/submissions/${submissionId}`
       });
     } catch (error) {
       const statusCode = error.statusCode || 500;

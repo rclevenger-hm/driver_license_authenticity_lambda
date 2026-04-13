@@ -49,6 +49,12 @@ It now returns a queued job response like:
 
 The screening result is written by the worker Lambda to the `results/` prefix in the same bucket.
 
+Submission status is also persisted in DynamoDB and can be retrieved through:
+
+```text
+GET /submissions/{submissionId}
+```
+
 ## Request payload
 
 Supported fields:
@@ -197,8 +203,10 @@ Terraform provisions:
 
 - An S3 bucket for submissions and results
 - An SQS queue plus dead-letter queue
+- A DynamoDB table for submission status
 - An intake Lambda
 - A worker Lambda
+- A status lookup Lambda
 - An event source mapping from SQS to the worker
 - API Gateway for the intake endpoint
 - IAM roles and policies for each Lambda
