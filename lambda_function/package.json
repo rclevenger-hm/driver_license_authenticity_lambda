@@ -1,11 +1,15 @@
 {
   "name": "driver-license-authenticity-lambda",
   "version": "1.0.0",
-  "description": "AWS Lambda and local server for driver license plausibility screening.",
-  "main": "index.js",
+  "description": "Async intake and screening Lambdas for driver license submissions.",
+  "main": "intake-handler.js",
   "scripts": {
     "start": "node server.js",
     "test": "node --test"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.821.0",
+    "@aws-sdk/client-sqs": "^3.821.0"
   },
   "engines": {
     "node": ">=20"

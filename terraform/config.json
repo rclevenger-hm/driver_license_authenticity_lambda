@@ -1,8 +1,11 @@
 {
   "region": "us-east-1",
-  "lambda_function_name": "driver-license-authenticity-lambda",
+  "intake_lambda_function_name": "driver-license-intake-lambda",
+  "worker_lambda_function_name": "driver-license-worker-lambda",
   "api_gateway_name": "driver-license-authenticity-api",
   "api_resource_path": "validate-license",
-  "stage_name": "prod"
+  "stage_name": "prod",
+  "bucket_name": "driver-license-authenticity-intake",
+  "queue_name": "driver-license-screening-jobs"
 }
   

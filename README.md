@@ -1,65 +1,67 @@
-# Driver License Plausibility Screening Lambda
+# Driver License Async Intake Pipeline
 
-This project has been revived into a working AWS Lambda and local HTTP service that performs first-pass screening for driver's license submissions.
+This project is now structured as an asynchronous intake system for driver's license screening.
 
-It does not claim to prove legal authenticity. Instead, it helps an intake pipeline decide whether a submission looks plausible enough to pass, should be manually reviewed, or should be rejected before more expensive checks happen.
+Instead of trying to do everything in a single request, the API accepts a submission, stores it in S3, places a job on SQS, and lets a worker Lambda process the document in the background. That gives the project a much more production-friendly shape for retries, throughput spikes, and longer-running enrichment later.
 
-## What it does
-
-The service accepts OCR text, base64-encoded image data, or both, and returns:
-
-- A `score` from 0 to 100
-- A `status` of `pass`, `review`, or `reject`
-- Positive `findings`
-- Risk `warnings`
-- Image metadata such as format, size, and dimensions when available
-- A plain-language `summary`
-
-## Screening logic
-
-The Lambda currently checks for:
-
-- Image file type support for PNG, JPEG, and GIF
-- Resolution and aspect ratio that resemble an ID card photo
-- Tiny or suspiciously small image payloads
-- Common driver's license keywords in OCR text
-- Presence of expected fields such as DOB, issue date, expiration date, address, class, and ID number
-- Detection of a U.S. state code
-- Basic chronology sanity checks across detected dates
-
-This makes the project useful as a low-cost fraud triage layer, a preprocessing step before manual review, or a guardrail ahead of DMV or vendor verification.
-
-## Project layout
-
-`lambda_function/`
-Runtime code, local server, and tests.
-
-`terraform/`
-Infrastructure for packaging the Lambda, creating an execution role, and exposing the function through API Gateway.
-
-## Local usage
-
-The project uses only Node's built-in modules, so there are no external runtime dependencies to install.
-
-Run tests:
-
-```bash
-cd lambda_function
-npm test
-```
-
-Run a local server:
-
-```bash
-cd lambda_function
-npm start
-```
-
-The local endpoint will be available at:
+## Architecture
 
 ```text
-POST http://localhost:3000/validate-license
+Client
+  -> API Gateway
+  -> Intake Lambda
+  -> S3 intake bucket (submission JSON)
+  -> SQS screening queue
+  -> Worker Lambda
+  -> S3 results prefix (screening output JSON)
 ```
+
+### Components
+
+`intake-handler.js`
+Receives API requests, validates the payload, writes the submission to S3, and enqueues a screening job.
+
+`worker-handler.js`
+Consumes SQS messages, loads the stored submission from S3, runs the screening engine, and writes the result back to S3.
+
+`screening.js`
+Shared screening engine that scores OCR text and image metadata for plausibility.
+
+`server.js`
+Local HTTP wrapper around the intake handler for quick development.
+
+## What the API does now
+
+`POST /validate-license` no longer returns the screening decision immediately.
+
+It now returns a queued job response like:
+
+```json
+{
+  "submissionId": "7f5f2a6d-3d3e-4c26-9f44-efdf5dd6e6e9",
+  "status": "queued",
+  "submittedAt": "2026-04-12T12:00:00.000Z",
+  "queue": "screening",
+  "submissionLocation": "s3://driver-license-authenticity-intake/submissions/7f5f2a6d-3d3e-4c26-9f44-efdf5dd6e6e9.json",
+  "resultLocation": "s3://driver-license-authenticity-intake/results/7f5f2a6d-3d3e-4c26-9f44-efdf5dd6e6e9.json"
+}
+```
+
+The screening result is written by the worker Lambda to the `results/` prefix in the same bucket.
+
+## Request payload
+
+Supported fields:
+
+- `imageBase64`
+- `image`
+- `documentImageBase64`
+- `ocrText`
+- `text`
+- `extractedText`
+- `metadata.stateCode`
+
+At least one of `imageBase64` or `ocrText` is required.
 
 Example request:
 
@@ -72,48 +74,142 @@ curl -X POST http://localhost:3000/validate-license \
   }'
 ```
 
-Example response:
+## Screening behavior
 
-```json
-{
-  "status": "pass",
-  "score": 100,
-  "summary": "Pre-screen passed with score 100. The submission looks plausible, but should still be verified against official or manual checks.",
-  "findings": [
-    "Image format detected as png.",
-    "Image resolution is sufficient for a first-pass review."
-  ],
-  "warnings": [],
-  "disclaimer": "This service performs document plausibility screening only. It does not confirm legal authenticity or DMV issuance."
-}
+The worker uses the shared screening engine to score document plausibility based on:
+
+- Image type support for PNG, JPEG, and GIF
+- Resolution and ID-card-like aspect ratio
+- Suspiciously tiny payload size
+- License-related OCR keywords
+- Presence of expected document fields
+- U.S. state detection
+- Basic date chronology checks
+
+The result is a structured JSON object with:
+
+- `status`: `pass`, `review`, or `reject`
+- `score`: `0-100`
+- `summary`
+- `findings`
+- `warnings`
+- `imageAnalysis`
+- `textAnalysis`
+- `disclaimer`
+
+This is still a plausibility screener, not a legal proof of authenticity.
+
+## Local development
+
+Install dependencies:
+
+```bash
+cd lambda_function
+npm install
 ```
 
-## Lambda event formats
+Run tests:
 
-The handler supports either:
+```bash
+cd lambda_function
+npm test
+```
 
-- Direct invocation with a JSON object containing `imageBase64` and or `ocrText`
-- API Gateway proxy events with a JSON `body`
+Run the local intake server:
 
-Supported payload fields:
+```bash
+cd lambda_function
+set INTAKE_BUCKET_NAME=local-intake
+set INTAKE_QUEUE_URL=http://localhost/fake-queue
+npm start
+```
 
-- `imageBase64`
-- `image`
-- `documentImageBase64`
-- `ocrText`
-- `text`
-- `extractedText`
-- `metadata.stateCode`
+Note:
+The local server executes the intake handler, so without real AWS credentials and infrastructure it is mainly useful for request-shape testing. The unit tests cover the S3 and SQS interactions with mocked clients.
 
-## Deploy with Terraform
+## AWS credentials
 
-Terraform packages the `lambda_function/` directory, creates an IAM execution role, provisions the Lambda, and exposes a `POST /validate-license` API Gateway route.
+AWS credentials are not stored in this repository.
+
+Before running Terraform or exercising the intake handler against real AWS services, configure credentials on your machine using one of these common paths.
+
+### Option 1: `aws configure`
+
+If you use long-lived access keys:
+
+```bash
+aws configure
+```
+
+You will be prompted for:
+
+- AWS Access Key ID
+- AWS Secret Access Key
+- Default region name
+- Default output format
+
+Example:
+
+```text
+AWS Access Key ID [None]: AKIA...
+AWS Secret Access Key [None]: ...
+Default region name [None]: us-east-1
+Default output format [None]: json
+```
+
+### Option 2: AWS SSO
+
+If your organization uses AWS IAM Identity Center or AWS SSO:
+
+```bash
+aws configure sso
+```
+
+After you complete setup, authenticate with:
+
+```bash
+aws sso login
+```
+
+If you use a named profile, you can run Terraform with it like this:
+
+```bash
+$env:AWS_PROFILE="your-profile-name"
+```
+
+### Verify credentials
+
+Before deploying, confirm that your local AWS CLI session is working:
+
+```bash
+aws sts get-caller-identity
+```
+
+That command should return your AWS account, user, or role identity.
+
+### Important note
+
+Do not put AWS secrets in this repository, in `terraform/config.json`, or in committed `.env` files. Use the AWS CLI credential store, environment variables, SSO, or an assumed role instead.
+
+## Terraform deployment
+
+Terraform provisions:
+
+- An S3 bucket for submissions and results
+- An SQS queue plus dead-letter queue
+- An intake Lambda
+- A worker Lambda
+- An event source mapping from SQS to the worker
+- API Gateway for the intake endpoint
+- IAM roles and policies for each Lambda
+
+Terraform also runs `npm ci --omit=dev` in `lambda_function/` before packaging so the Lambda bundle includes the AWS SDK clients it depends on.
 
 Before deploying:
 
 1. Install Terraform.
-2. Configure AWS credentials for the target account.
-3. Review `terraform/config.json`.
+2. Configure AWS credentials using the section above.
+3. Review and customize `terraform/config.json`, especially the bucket and function names.
 
 Deploy:
 
@@ -130,23 +226,23 @@ cd terraform
 terraform destroy
 ```
 
-## Docker
+## Project layout
 
-Run the local server with Docker Compose:
+`lambda_function/`
+Application code, AWS handlers, local server, and tests.
 
-```bash
-docker compose up --build
-```
+`terraform/`
+AWS infrastructure for the async pipeline.
 
 ## Good next steps
 
-If you want to keep investing in this project, the most valuable additions would be:
+The next high-value upgrades would be:
 
-1. Plug in a real OCR stage such as Textract or Rekognition upstream.
-2. Add barcode or PDF417 parsing for AAMVA-compliant licenses.
-3. Introduce state-specific field validation rules.
-4. Persist screening results for analyst review and feedback loops.
-5. Add confidence calibration with real sample documents.
+1. Add a status lookup endpoint so clients can retrieve results by `submissionId`.
+2. Store original binary uploads instead of only a JSON envelope when images are posted to the API.
+3. Add Textract, Rekognition, or another OCR stage before scoring.
+4. Parse PDF417 barcodes for AAMVA-compatible licenses.
+5. Persist analyst review feedback to calibrate scoring over time.
 
 ## License
 

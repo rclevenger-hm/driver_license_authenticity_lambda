@@ -2,7 +2,7 @@
 
 const http = require('node:http');
 
-const { handler } = require('./index');
+const { handler } = require('./intake-handler');
 
 const port = Number(process.env.PORT || 3000);
 
