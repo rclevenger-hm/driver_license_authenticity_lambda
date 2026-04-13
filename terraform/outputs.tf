@@ -37,3 +37,8 @@ output "status_endpoint_template" {
   description = "Template URL for submission status lookups."
   value       = "https://${aws_api_gateway_rest_api.driver_license_api.id}.execute-api.${local.region}.amazonaws.com/${aws_api_gateway_stage.driver_license_api_stage.stage_name}/${aws_api_gateway_resource.submissions_resource.path_part}/{submissionId}"
 }
+
+output "api_key_id" {
+  description = "API Gateway API key identifier for clients."
+  value       = aws_api_gateway_api_key.driver_license_client.id
+}

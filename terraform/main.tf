@@ -32,6 +32,9 @@ locals {
   log_retention_days          = try(local.config.log_retention_days, 14)
   submission_retention_days   = try(local.config.submission_retention_days, 30)
   result_retention_days       = try(local.config.result_retention_days, 180)
+  api_key_name                = "${try(local.config.api_key_name, "driver-license-client")}${local.suffix}"
+  throttle_burst_limit        = try(local.config.throttle_burst_limit, 20)
+  throttle_rate_limit         = try(local.config.throttle_rate_limit, 10)
   submission_prefix           = "submissions"
   result_prefix               = "results"
   common_tags                 = try(local.config.tags, {})
@@ -478,6 +481,7 @@ resource "aws_api_gateway_method" "driver_license_api_method" {
   resource_id   = aws_api_gateway_resource.driver_license_api_resource.id
   http_method   = "POST"
   authorization = "NONE"
+  api_key_required = true
 }
 
 resource "aws_api_gateway_integration" "driver_license_api_integration" {
@@ -494,6 +498,7 @@ resource "aws_api_gateway_method" "submission_status_method" {
   resource_id   = aws_api_gateway_resource.submission_id_resource.id
   http_method   = "GET"
   authorization = "NONE"
+  api_key_required = true
 }
 
 resource "aws_api_gateway_integration" "submission_status_integration" {
@@ -545,4 +550,31 @@ resource "aws_api_gateway_stage" "driver_license_api_stage" {
   rest_api_id   = aws_api_gateway_rest_api.driver_license_api.id
   stage_name    = local.stage_name
   tags          = local.common_tags
+}
+
+resource "aws_api_gateway_usage_plan" "driver_license_api_plan" {
+  name = "${local.api_gateway_name}-usage-plan"
+  tags = local.common_tags
+
+  api_stages {
+    api_id = aws_api_gateway_rest_api.driver_license_api.id
+    stage  = aws_api_gateway_stage.driver_license_api_stage.stage_name
+  }
+
+  throttle_settings {
+    burst_limit = local.throttle_burst_limit
+    rate_limit  = local.throttle_rate_limit
+  }
+}
+
+resource "aws_api_gateway_api_key" "driver_license_client" {
+  name    = local.api_key_name
+  enabled = true
+  tags    = local.common_tags
+}
+
+resource "aws_api_gateway_usage_plan_key" "driver_license_client" {
+  key_id        = aws_api_gateway_api_key.driver_license_client.id
+  key_type      = "API_KEY"
+  usage_plan_id = aws_api_gateway_usage_plan.driver_license_api_plan.id
 }

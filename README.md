@@ -59,6 +59,8 @@ GET /submissions/{submissionId}
 
 The status record now keeps searchable operational fields such as `status`, `reviewStatus`, `lastUpdatedAt`, `processedAt`, `warningsCount`, `findingsCount`, and source-data hints for audit and queue monitoring.
 
+All API Gateway routes are protected by an API key and attached to a throttled usage plan. Clients must send the `x-api-key` header when calling the deployed API.
+
 ## Request payload
 
 Supported fields:

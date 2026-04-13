@@ -14,6 +14,9 @@
   "log_retention_days": 14,
   "submission_retention_days": 30,
   "result_retention_days": 180,
+  "api_key_name": "driver-license-client",
+  "throttle_burst_limit": 20,
+  "throttle_rate_limit": 10,
   "tags": {
     "project": "driver-license-authenticity",
     "managed-by": "terraform",
