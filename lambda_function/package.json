@@ -5,7 +5,8 @@
   "main": "intake-handler.js",
   "scripts": {
     "start": "node server.js",
-    "test": "node --test"
+    "test": "node --test",
+    "smoke": "node scripts/smoke.js"
   },
   "dependencies": {
     "@aws-sdk/client-dynamodb": "^3.821.0",

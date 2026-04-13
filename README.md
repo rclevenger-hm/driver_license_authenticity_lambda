@@ -130,6 +130,13 @@ cd lambda_function
 npm test
 ```
 
+Run the lightweight end-to-end smoke path:
+
+```bash
+cd lambda_function
+npm run smoke
+```
+
 Run the local intake server:
 
 ```bash

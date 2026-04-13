@@ -14,7 +14,7 @@ terraform {
 }
 
 locals {
-  config = jsondecode(file("${path.module}/config.json"))
+  config      = jsondecode(file("${path.module}/config.json"))
   name_suffix = trimspace(try(local.config.name_suffix, ""))
   suffix      = local.name_suffix != "" ? "-${local.name_suffix}" : ""
 
@@ -374,12 +374,12 @@ resource "aws_lambda_function" "intake" {
 
   environment {
     variables = {
-      NODE_ENV           = "production"
-      INTAKE_BUCKET_NAME = aws_s3_bucket.intake_bucket.bucket
-      INTAKE_QUEUE_URL   = aws_sqs_queue.screening_jobs.id
+      NODE_ENV              = "production"
+      INTAKE_BUCKET_NAME    = aws_s3_bucket.intake_bucket.bucket
+      INTAKE_QUEUE_URL      = aws_sqs_queue.screening_jobs.id
       SUBMISSION_TABLE_NAME = aws_dynamodb_table.submissions.name
-      SUBMISSION_PREFIX  = local.submission_prefix
-      RESULT_PREFIX      = local.result_prefix
+      SUBMISSION_PREFIX     = local.submission_prefix
+      RESULT_PREFIX         = local.result_prefix
     }
   }
 
@@ -477,10 +477,10 @@ resource "aws_api_gateway_resource" "submission_id_resource" {
 }
 
 resource "aws_api_gateway_method" "driver_license_api_method" {
-  rest_api_id   = aws_api_gateway_rest_api.driver_license_api.id
-  resource_id   = aws_api_gateway_resource.driver_license_api_resource.id
-  http_method   = "POST"
-  authorization = "NONE"
+  rest_api_id      = aws_api_gateway_rest_api.driver_license_api.id
+  resource_id      = aws_api_gateway_resource.driver_license_api_resource.id
+  http_method      = "POST"
+  authorization    = "NONE"
   api_key_required = true
 }
 
@@ -494,10 +494,10 @@ resource "aws_api_gateway_integration" "driver_license_api_integration" {
 }
 
 resource "aws_api_gateway_method" "submission_status_method" {
-  rest_api_id   = aws_api_gateway_rest_api.driver_license_api.id
-  resource_id   = aws_api_gateway_resource.submission_id_resource.id
-  http_method   = "GET"
-  authorization = "NONE"
+  rest_api_id      = aws_api_gateway_rest_api.driver_license_api.id
+  resource_id      = aws_api_gateway_resource.submission_id_resource.id
+  http_method      = "GET"
+  authorization    = "NONE"
   api_key_required = true
 }
 
@@ -531,12 +531,12 @@ resource "aws_api_gateway_deployment" "driver_license_api_deployment" {
 
   triggers = {
     redeployment = sha1(jsonencode({
-      integration = aws_api_gateway_integration.driver_license_api_integration.id
+      integration        = aws_api_gateway_integration.driver_license_api_integration.id
       status_integration = aws_api_gateway_integration.submission_status_integration.id
-      method      = aws_api_gateway_method.driver_license_api_method.id
-      status_method = aws_api_gateway_method.submission_status_method.id
-      resource    = aws_api_gateway_resource.driver_license_api_resource.id
-      status_resource = aws_api_gateway_resource.submission_id_resource.id
+      method             = aws_api_gateway_method.driver_license_api_method.id
+      status_method      = aws_api_gateway_method.submission_status_method.id
+      resource           = aws_api_gateway_resource.driver_license_api_resource.id
+      status_resource    = aws_api_gateway_resource.submission_id_resource.id
     }))
   }
 
