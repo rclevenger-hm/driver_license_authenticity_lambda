@@ -57,6 +57,8 @@ Submission status is also persisted in DynamoDB and can be retrieved through:
 GET /submissions/{submissionId}
 ```
 
+The status record now keeps searchable operational fields such as `status`, `reviewStatus`, `lastUpdatedAt`, `processedAt`, `warningsCount`, `findingsCount`, and source-data hints for audit and queue monitoring.
+
 ## Request payload
 
 Supported fields:

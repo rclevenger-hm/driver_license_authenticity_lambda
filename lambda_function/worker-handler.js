@@ -96,7 +96,7 @@ function createWorkerHandler(options = {}) {
           await documentClient.send(new UpdateCommand({
             TableName: message.tableName || process.env.SUBMISSION_TABLE_NAME,
             Key: { submissionId: message.submissionId },
-            UpdateExpression: 'SET #status = :status, processedAt = :processedAt, lastUpdatedAt = :lastUpdatedAt, resultKey = :resultKey, analysisSummary = :analysisSummary, analysisScore = :analysisScore, reviewStatus = :reviewStatus, ocrSource = :ocrSource, barcodeFormat = :barcodeFormat',
+            UpdateExpression: 'SET #status = :status, processedAt = :processedAt, lastUpdatedAt = :lastUpdatedAt, resultKey = :resultKey, analysisSummary = :analysisSummary, analysisScore = :analysisScore, reviewStatus = :reviewStatus, ocrSource = :ocrSource, barcodeFormat = :barcodeFormat, warningsCount = :warningsCount, findingsCount = :findingsCount, detectedState = :detectedState, ocrTextLength = :ocrTextLength',
             ExpressionAttributeNames: {
               '#status': 'status'
             },
@@ -109,7 +109,11 @@ function createWorkerHandler(options = {}) {
               ':analysisScore': analysis.score,
               ':reviewStatus': analysis.status,
               ':ocrSource': extractedOcr ? extractedOcr.source : 'provided',
-              ':barcodeFormat': parsedBarcode ? parsedBarcode.format : null
+              ':barcodeFormat': parsedBarcode ? parsedBarcode.format : null,
+              ':warningsCount': analysis.warnings.length,
+              ':findingsCount': analysis.findings.length,
+              ':detectedState': analysis.textAnalysis ? analysis.textAnalysis.detectedState : null,
+              ':ocrTextLength': payloadWithBinary.ocrText ? payloadWithBinary.ocrText.length : 0
             }
           }));
         }
@@ -122,14 +126,16 @@ function createWorkerHandler(options = {}) {
             await documentClient.send(new UpdateCommand({
               TableName: message.tableName || process.env.SUBMISSION_TABLE_NAME,
               Key: { submissionId: message.submissionId },
-              UpdateExpression: 'SET #status = :status, lastUpdatedAt = :lastUpdatedAt, errorMessage = :errorMessage',
+              UpdateExpression: 'SET #status = :status, lastUpdatedAt = :lastUpdatedAt, errorMessage = :errorMessage, failureCount = if_not_exists(failureCount, :zero) + :one',
               ExpressionAttributeNames: {
                 '#status': 'status'
               },
               ExpressionAttributeValues: {
                 ':status': 'failed',
                 ':lastUpdatedAt': failedAt,
-                ':errorMessage': error.message
+                ':errorMessage': error.message,
+                ':zero': 0,
+                ':one': 1
               }
             }));
           }

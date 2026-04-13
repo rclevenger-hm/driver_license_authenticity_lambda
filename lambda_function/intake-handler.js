@@ -78,13 +78,21 @@ function createIntakeHandler(options = {}) {
         Item: {
           submissionId,
           status: 'queued',
+          submissionType: 'driver-license',
           submittedAt,
+          submittedDate: submittedAt.slice(0, 10),
           queue: 'screening',
+          hasImage: Boolean(sourceImage),
+          hasProvidedOcr: Boolean(payload.ocrText),
+          hasBarcodeData: Boolean(payload.barcodeData),
+          stateCodeHint: payload.metadata && payload.metadata.stateCode ? payload.metadata.stateCode : null,
+          sourceImageMimeType: sourceImage ? sourceImage.mimeType : null,
           submissionBucket: bucketName,
           submissionKey: objectKey,
           sourceImageKey: sourceImage ? sourceImage.key : null,
           resultKey,
-          lastUpdatedAt: submittedAt
+          lastUpdatedAt: submittedAt,
+          processingVersion: '2026-04-12.a'
         }
       }));
 

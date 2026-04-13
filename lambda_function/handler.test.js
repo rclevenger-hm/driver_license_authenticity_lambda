@@ -79,6 +79,8 @@ test('intake handler stores the submission and queues a worker job', async () =>
   assert.match(calls[1].input.Key, /submissions\/submission-123\.json$/);
   assert.equal(calls[2].service, 'ddb');
   assert.equal(calls[2].input.TableName, 'submission-status');
+  assert.equal(calls[2].input.Item.submissionType, 'driver-license');
+  assert.equal(calls[2].input.Item.hasImage, true);
   assert.equal(calls[3].service, 'sqs');
   assert.match(calls[3].input.MessageBody, /submission-123/);
   assert.match(payload.sourceImageLocation, /uploads\/submission-123\.png$/);
@@ -160,6 +162,8 @@ test('worker handler reads a queued submission and writes screening results', as
   assert.equal(writes[0].Key, 'results/submission-123.json');
   assert.equal(statusUpdates.length, 1);
   assert.equal(statusUpdates[0].TableName, 'submission-status');
+  assert.match(statusUpdates[0].UpdateExpression, /warningsCount/);
+  assert.equal(statusUpdates[0].ExpressionAttributeValues[':reviewStatus'], 'pass');
 
   const storedResult = JSON.parse(writes[0].Body);
   assert.equal(storedResult.status, 'completed');
@@ -332,6 +336,7 @@ test('worker handler reports failed queue items for retry', async () => {
   });
   assert.equal(statusUpdates.length, 1);
   assert.equal(statusUpdates[0].TableName, 'submission-status');
+  assert.match(statusUpdates[0].UpdateExpression, /failureCount/);
 });
 
 test('status handler returns stored submission state', async () => {

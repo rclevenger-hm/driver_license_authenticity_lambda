@@ -110,6 +110,40 @@ resource "aws_dynamodb_table" "submissions" {
     name = "submissionId"
     type = "S"
   }
+
+  attribute {
+    name = "status"
+    type = "S"
+  }
+
+  attribute {
+    name = "lastUpdatedAt"
+    type = "S"
+  }
+
+  attribute {
+    name = "reviewStatus"
+    type = "S"
+  }
+
+  attribute {
+    name = "processedAt"
+    type = "S"
+  }
+
+  global_secondary_index {
+    name            = "status-lastUpdatedAt-index"
+    hash_key        = "status"
+    range_key       = "lastUpdatedAt"
+    projection_type = "ALL"
+  }
+
+  global_secondary_index {
+    name            = "reviewStatus-processedAt-index"
+    hash_key        = "reviewStatus"
+    range_key       = "processedAt"
+    projection_type = "ALL"
+  }
 }
 
 resource "aws_iam_role" "intake_lambda_execution" {
