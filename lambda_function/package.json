@@ -1,0 +1,22 @@
+{
+  "name": "driver-license-authenticity-lambda",
+  "version": "1.0.0",
+  "description": "Async intake and screening Lambdas for driver license submissions.",
+  "main": "intake-handler.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test",
+    "smoke": "node scripts/smoke.js"
+  },
+  "dependencies": {
+    "@aws-sdk/client-dynamodb": "^3.821.0",
+    "@aws-sdk/lib-dynamodb": "^3.821.0",
+    "@aws-sdk/client-s3": "^3.821.0",
+    "@aws-sdk/client-sqs": "^3.821.0",
+    "@aws-sdk/client-textract": "^3.821.0"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "license": "MIT"
+}

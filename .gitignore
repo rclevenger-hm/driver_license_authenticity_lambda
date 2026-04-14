@@ -109,6 +109,7 @@ dist
 
 # Serverless directories
 .serverless/
+.terraform/
 
 # FuseBox cache
 .fusebox/

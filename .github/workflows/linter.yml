@@ -1,0 +1,31 @@
+name: Code Quality & Linting
+
+on: [push, pull_request]
+
+jobs:
+  lint:
+    name: Run super-linter
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+
+      - name: Run super-linter
+        uses: github/super-linter@v4
+        with:
+          VALIDATE_DOCKERFILE: 'true'
+          VALIDATE_MARKDOWN: 'false'
+          VALIDATE_YAML: 'true'
+          VALIDATE_JSON: 'true'
+          VALIDATE_XML: 'true'
+          VALIDATE_TERRAFORM: 'true'
+          VALIDATE_GO: 'true'
+          VALIDATE_JAVASCRIPT_ES: 'true'
+          VALIDATE_JAVASCRIPT_STANDARD: 'true'
+          VALIDATE_JAVASCRIPT_PREFERRED: 'true'
+          VALIDATE_JAVASCRIPT_REACT: 'true'
+          VALIDATE_TYPESCRIPT_ES: 'true'
+          VALIDATE_TYPESCRIPT_STANDARD: 'true'
+          VALIDATE_TYPESCRIPT_PREFERRED: 'true'
+          VALIDATE_TYPESCRIPT_REACT: 'true'
