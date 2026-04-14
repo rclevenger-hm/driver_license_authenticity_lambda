@@ -9,10 +9,23 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
 
       - name: Install Snyk
+        if: ${{ secrets.SNYK_TOKEN != '' }}
         run: npm install -g snyk
 
       - name: Run Snyk Security Scan
+        if: ${{ secrets.SNYK_TOKEN != '' }}
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
         run: snyk test --all-projects
+
+      - name: Skip when Snyk token is unavailable
+        if: ${{ secrets.SNYK_TOKEN == '' }}
+        run: echo "SNYK_TOKEN is not configured for this repository; skipping Snyk scan."

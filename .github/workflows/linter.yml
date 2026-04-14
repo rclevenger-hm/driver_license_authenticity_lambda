@@ -6,26 +6,29 @@ jobs:
   lint:
     name: Run super-linter
     runs-on: ubuntu-latest
+    env:
+      DEFAULT_BRANCH: main
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      VALIDATE_ALL_CODEBASE: false
+      VALIDATE_DOCKERFILE: true
+      VALIDATE_MARKDOWN: false
+      VALIDATE_YAML: true
+      VALIDATE_JSON: true
+      VALIDATE_XML: true
+      VALIDATE_TERRAFORM: true
+      VALIDATE_JAVASCRIPT_ES: true
+      VALIDATE_JAVASCRIPT_STANDARD: false
+      VALIDATE_JAVASCRIPT_PREFERRED: false
+      VALIDATE_JAVASCRIPT_REACT: false
+      VALIDATE_TYPESCRIPT_ES: false
+      VALIDATE_TYPESCRIPT_STANDARD: false
+      VALIDATE_TYPESCRIPT_PREFERRED: false
+      VALIDATE_TYPESCRIPT_REACT: false
+      VALIDATE_GO: false
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
 
       - name: Run super-linter
-        uses: github/super-linter@v4
-        with:
-          VALIDATE_DOCKERFILE: 'true'
-          VALIDATE_MARKDOWN: 'false'
-          VALIDATE_YAML: 'true'
-          VALIDATE_JSON: 'true'
-          VALIDATE_XML: 'true'
-          VALIDATE_TERRAFORM: 'true'
-          VALIDATE_GO: 'true'
-          VALIDATE_JAVASCRIPT_ES: 'true'
-          VALIDATE_JAVASCRIPT_STANDARD: 'true'
-          VALIDATE_JAVASCRIPT_PREFERRED: 'true'
-          VALIDATE_JAVASCRIPT_REACT: 'true'
-          VALIDATE_TYPESCRIPT_ES: 'true'
-          VALIDATE_TYPESCRIPT_STANDARD: 'true'
-          VALIDATE_TYPESCRIPT_PREFERRED: 'true'
-          VALIDATE_TYPESCRIPT_REACT: 'true'
+        uses: github/super-linter/slim@v7
