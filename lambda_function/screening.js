@@ -17,13 +17,27 @@ const LICENSE_TERMS = [
   /\blicense\b/i
 ];
 
+const PASSPORT_TERMS = [
+  /\bpassport\b/i,
+  /\bnationality\b/i,
+  /\bplace\s+of\s+birth\b/i,
+  /\bissuing\s+authority\b/i,
+  /\bpassport\s+no\b/i,
+  /\bp</i
+];
+
 const FIELD_PATTERNS = {
   birthDate: /\b(dob|date\s*of\s*birth|birth\s*date)\b/i,
   issueDate: /\b(issue|issued|iss)\b/i,
   expirationDate: /\b(exp|expires|expiration)\b/i,
   address: /\b(address|addr|street|st\.|avenue|ave\.|road|rd\.)\b/i,
   idNumber: /\b(dl|lic|license|id)\s*(number|no|#)\b/i,
-  classCode: /\bclass\s*[a-z0-9]+\b/i
+  classCode: /\bclass\s*[a-z0-9]+\b/i,
+  passportNumber: /\b(passport)\s*(number|no|#)?\b/i,
+  nationality: /\bnationality\b/i,
+  placeOfBirth: /\bplace\s+of\s+birth\b/i,
+  issuingAuthority: /\bissuing\s+authority\b/i,
+  mrz: /\bP<[A-Z<]+\b/i
 };
 
 function normalizeInvocationEvent(event) {
@@ -61,12 +75,14 @@ function normalizePayload(payload) {
   const ocrText = firstString(payload.ocrText, payload.text, payload.extractedText);
   const barcodeData = firstString(payload.barcodeData, payload.pdf417Data);
   const metadata = payload.metadata && typeof payload.metadata === 'object' ? payload.metadata : {};
+  const documentType = normalizeDocumentType(payload.documentType, metadata.documentType);
 
   if (!imageBase64 && !ocrText && !barcodeData) {
     throw badRequest('At least one of `imageBase64`, `ocrText`, or `barcodeData` is required.');
   }
 
   return {
+    documentType,
     imageBase64,
     ocrText,
     barcodeData,
@@ -74,10 +90,11 @@ function normalizePayload(payload) {
   };
 }
 
-function analyzeDocument({ imageBase64, ocrText, metadata }) {
+function analyzeDocument({ documentType, imageBase64, ocrText, metadata }) {
   const findings = [];
   const warnings = [];
   const inspectedChecks = [];
+  const normalizedDocumentType = documentType || 'driver-license';
   let score = 50;
 
   let imageAnalysis = null;
@@ -97,12 +114,22 @@ function analyzeDocument({ imageBase64, ocrText, metadata }) {
         score -= 18;
       }
 
-      if (imageAnalysis.aspectRatio >= 1.3 && imageAnalysis.aspectRatio <= 2.2) {
-        findings.push('Image aspect ratio is consistent with a photographed ID card.');
-        score += 6;
+      if (normalizedDocumentType === 'passport') {
+        if (imageAnalysis.aspectRatio >= 0.6 && imageAnalysis.aspectRatio <= 0.9) {
+          findings.push('Image aspect ratio is consistent with a passport identity page.');
+          score += 6;
+        } else {
+          warnings.push('Image aspect ratio is unusual for a passport identity page.');
+          score -= 10;
+        }
       } else {
-        warnings.push('Image aspect ratio is unusual for a standard license card.');
-        score -= 10;
+        if (imageAnalysis.aspectRatio >= 1.3 && imageAnalysis.aspectRatio <= 2.2) {
+          findings.push('Image aspect ratio is consistent with a photographed ID card.');
+          score += 6;
+        } else {
+          warnings.push('Image aspect ratio is unusual for a standard license card.');
+          score -= 10;
+        }
       }
 
       if (imageAnalysis.byteLength < 15 * 1024) {
@@ -119,12 +146,12 @@ function analyzeDocument({ imageBase64, ocrText, metadata }) {
 
   let textAnalysis = null;
   if (ocrText) {
-    textAnalysis = inspectOcrText(ocrText, metadata);
+    textAnalysis = inspectOcrText(ocrText, metadata, normalizedDocumentType);
     inspectedChecks.push(
       'document_keywords',
       'field_presence',
       'date_consistency',
-      'state_detection'
+      normalizedDocumentType === 'passport' ? 'mrz_detection' : 'state_detection'
     );
 
     score += textAnalysis.scoreDelta;
@@ -138,6 +165,7 @@ function analyzeDocument({ imageBase64, ocrText, metadata }) {
 
   return {
     status: decision,
+    documentType: normalizedDocumentType,
     score,
     summary: buildSummary(decision, score, findings, warnings),
     findings,
@@ -145,7 +173,9 @@ function analyzeDocument({ imageBase64, ocrText, metadata }) {
     inspectedChecks,
     imageAnalysis,
     textAnalysis,
-    disclaimer: 'This service performs document plausibility screening only. It does not confirm legal authenticity or DMV issuance.'
+    disclaimer: normalizedDocumentType === 'passport'
+      ? 'This service performs passport plausibility screening only. It does not confirm legal authenticity, issuance, or border-travel validity.'
+      : 'This service performs document plausibility screening only. It does not confirm legal authenticity or DMV issuance.'
   };
 }
 
@@ -191,26 +221,27 @@ function inspectImage(imageBase64) {
   return result;
 }
 
-function inspectOcrText(ocrText, metadata) {
+function inspectOcrText(ocrText, metadata, documentType = 'driver-license') {
   const normalizedText = ocrText.replace(/\s+/g, ' ').trim();
   const uppercaseText = normalizedText.toUpperCase();
   const findings = [];
   const warnings = [];
   let scoreDelta = 0;
 
-  const termMatches = LICENSE_TERMS.filter((pattern) => pattern.test(normalizedText)).length;
+  const termPatterns = documentType === 'passport' ? PASSPORT_TERMS : LICENSE_TERMS;
+  const termMatches = termPatterns.filter((pattern) => pattern.test(normalizedText)).length;
   if (termMatches >= 2) {
-    findings.push('OCR text contains multiple license-related keywords.');
+    findings.push(`OCR text contains multiple ${documentType}-related keywords.`);
     scoreDelta += 16;
   } else if (termMatches === 1) {
-    findings.push('OCR text contains a license-related keyword.');
+    findings.push(`OCR text contains a ${documentType}-related keyword.`);
     scoreDelta += 8;
   } else {
-    warnings.push('OCR text is missing common driver license keywords.');
+    warnings.push(`OCR text is missing common ${documentType} keywords.`);
     scoreDelta -= 20;
   }
 
-  const presentFields = detectFields(normalizedText);
+  const presentFields = detectFields(normalizedText, documentType);
   const presentFieldNames = Object.entries(presentFields)
     .filter(([, present]) => present)
     .map(([name]) => name);
@@ -222,17 +253,30 @@ function inspectOcrText(ocrText, metadata) {
     findings.push(`OCR text includes some expected fields: ${presentFieldNames.join(', ')}.`);
     scoreDelta += 8;
   } else {
-    warnings.push('OCR text is missing several expected identity document fields.');
+    warnings.push(`OCR text is missing several expected ${documentType} fields.`);
     scoreDelta -= 16;
   }
 
-  const detectedState = detectStateCode(uppercaseText, metadata.stateCode);
-  if (detectedState) {
-    findings.push(`Detected U.S. jurisdiction code ${detectedState}.`);
-    scoreDelta += 6;
+  let detectedState = null;
+  let mrzDetected = false;
+  if (documentType === 'passport') {
+    mrzDetected = FIELD_PATTERNS.mrz.test(uppercaseText) || hasMrzLikeLine(ocrText);
+    if (mrzDetected) {
+      findings.push('Detected passport MRZ-style content.');
+      scoreDelta += 10;
+    } else {
+      warnings.push('No machine-readable zone pattern was detected in OCR text.');
+      scoreDelta -= 8;
+    }
   } else {
-    warnings.push('No U.S. state or district code was detected in OCR text or metadata.');
-    scoreDelta -= 8;
+    detectedState = detectStateCode(uppercaseText, metadata.stateCode);
+    if (detectedState) {
+      findings.push(`Detected U.S. jurisdiction code ${detectedState}.`);
+      scoreDelta += 6;
+    } else {
+      warnings.push('No U.S. state or district code was detected in OCR text or metadata.');
+      scoreDelta -= 8;
+    }
   }
 
   const dates = extractDates(normalizedText);
@@ -252,6 +296,7 @@ function inspectOcrText(ocrText, metadata) {
   return {
     extractedFieldCount: presentFieldNames.length,
     detectedState,
+    mrzDetected,
     detectedDates: dates.map((date) => date.raw),
     findings,
     warnings,
@@ -259,7 +304,19 @@ function inspectOcrText(ocrText, metadata) {
   };
 }
 
-function detectFields(text) {
+function detectFields(text, documentType) {
+  if (documentType === 'passport') {
+    return {
+      birthDate: FIELD_PATTERNS.birthDate.test(text),
+      issueDate: FIELD_PATTERNS.issueDate.test(text),
+      expirationDate: FIELD_PATTERNS.expirationDate.test(text),
+      passportNumber: FIELD_PATTERNS.passportNumber.test(text),
+      nationality: FIELD_PATTERNS.nationality.test(text),
+      placeOfBirth: FIELD_PATTERNS.placeOfBirth.test(text),
+      issuingAuthority: FIELD_PATTERNS.issuingAuthority.test(text)
+    };
+  }
+
   return {
     birthDate: FIELD_PATTERNS.birthDate.test(text),
     issueDate: FIELD_PATTERNS.issueDate.test(text),
@@ -309,6 +366,12 @@ function extractDates(text) {
   }
 
   return matches.slice(0, 6);
+}
+
+function hasMrzLikeLine(text) {
+  return text
+    .split(/\r?\n/)
+    .some((line) => /[A-Z0-9<]{20,}/.test(line.trim()));
 }
 
 function evaluateDateChronology(dates) {
@@ -362,6 +425,25 @@ function badRequest(message) {
   const error = new Error(message);
   error.statusCode = 400;
   return error;
+}
+
+function normalizeDocumentType(...values) {
+  for (const value of values) {
+    if (typeof value !== 'string') {
+      continue;
+    }
+
+    const normalized = value.trim().toLowerCase();
+    if (['driver-license', 'drivers-license', 'license', 'driver_license'].includes(normalized)) {
+      return 'driver-license';
+    }
+
+    if (['passport', 'passport-book', 'passport-booklet'].includes(normalized)) {
+      return 'passport';
+    }
+  }
+
+  return 'driver-license';
 }
 
 function firstString(...values) {
@@ -419,6 +501,7 @@ module.exports = {
   badRequest,
   inspectImage,
   inspectOcrText,
+  normalizeDocumentType,
   normalizeInvocationEvent,
   normalizePayload
 };

@@ -96,7 +96,7 @@ function createWorkerHandler(options = {}) {
           await documentClient.send(new UpdateCommand({
             TableName: message.tableName || process.env.SUBMISSION_TABLE_NAME,
             Key: { submissionId: message.submissionId },
-            UpdateExpression: 'SET #status = :status, processedAt = :processedAt, lastUpdatedAt = :lastUpdatedAt, resultKey = :resultKey, analysisSummary = :analysisSummary, analysisScore = :analysisScore, reviewStatus = :reviewStatus, ocrSource = :ocrSource, barcodeFormat = :barcodeFormat, warningsCount = :warningsCount, findingsCount = :findingsCount, detectedState = :detectedState, ocrTextLength = :ocrTextLength',
+            UpdateExpression: 'SET #status = :status, processedAt = :processedAt, lastUpdatedAt = :lastUpdatedAt, resultKey = :resultKey, analysisSummary = :analysisSummary, analysisScore = :analysisScore, reviewStatus = :reviewStatus, ocrSource = :ocrSource, barcodeFormat = :barcodeFormat, warningsCount = :warningsCount, findingsCount = :findingsCount, detectedState = :detectedState, ocrTextLength = :ocrTextLength, submissionType = :documentType',
             ExpressionAttributeNames: {
               '#status': 'status'
             },
@@ -113,7 +113,8 @@ function createWorkerHandler(options = {}) {
               ':warningsCount': analysis.warnings.length,
               ':findingsCount': analysis.findings.length,
               ':detectedState': analysis.textAnalysis ? analysis.textAnalysis.detectedState : null,
-              ':ocrTextLength': payloadWithBinary.ocrText ? payloadWithBinary.ocrText.length : 0
+              ':ocrTextLength': payloadWithBinary.ocrText ? payloadWithBinary.ocrText.length : 0,
+              ':documentType': analysis.documentType
             }
           }));
         }

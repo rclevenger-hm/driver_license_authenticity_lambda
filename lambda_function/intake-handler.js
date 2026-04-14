@@ -78,7 +78,7 @@ function createIntakeHandler(options = {}) {
         Item: {
           submissionId,
           status: 'queued',
-          submissionType: 'driver-license',
+          submissionType: payload.documentType,
           submittedAt,
           submittedDate: submittedAt.slice(0, 10),
           queue: 'screening',

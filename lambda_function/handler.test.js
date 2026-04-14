@@ -28,6 +28,24 @@ test('direct screening handler still returns a pass result for plausible content
   assert.match(payload.disclaimer, /plausibility screening/i);
 });
 
+test('direct screening handler supports passport submissions', async () => {
+  const event = {
+    body: JSON.stringify({
+      documentType: 'passport',
+      ocrText: 'PASSPORT Passport No 123456789 Nationality USA Place of Birth CHICAGO Date of Birth 01/02/1990 Date of Issue 01/01/2020 Date of Expiry 01/01/2030 Issuing Authority UNITED STATES P<USADOE<<JANE<<<<<<<<<<<<<<<<<<<<<<< 1234567890USA9001021F3001012<<<<<<<<<<<<<<04'
+    })
+  };
+
+  const response = await screeningHandler(event);
+  const payload = JSON.parse(response.body);
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(payload.documentType, 'passport');
+  assert.ok(payload.score >= 75);
+  assert.equal(payload.textAnalysis.mrzDetected, true);
+  assert.match(payload.disclaimer, /passport plausibility screening/i);
+});
+
 test('intake handler stores the submission and queues a worker job', async () => {
   const calls = [];
   const fakeS3 = {
@@ -85,6 +103,32 @@ test('intake handler stores the submission and queues a worker job', async () =>
   assert.match(calls[3].input.MessageBody, /submission-123/);
   assert.match(payload.sourceImageLocation, /uploads\/submission-123\.png$/);
   assert.equal(payload.statusEndpoint, '/submissions/submission-123');
+});
+
+test('intake handler persists passport submission type', async () => {
+  const calls = [];
+  const handler = createIntakeHandler({
+    s3Client: { async send(command) { calls.push({ service: 's3', input: command.input }); return {}; } },
+    sqsClient: { async send(command) { calls.push({ service: 'sqs', input: command.input }); return {}; } },
+    documentClient: { async send(command) { calls.push({ service: 'ddb', input: command.input }); return {}; } },
+    bucketName: 'intake-bucket',
+    queueUrl: 'https://example.invalid/queue',
+    tableName: 'submission-status',
+    createId: () => 'passport-123',
+    now: () => '2026-04-13T09:00:00.000Z'
+  });
+
+  const response = await handler({
+    body: JSON.stringify({
+      documentType: 'passport',
+      ocrText: 'PASSPORT Nationality USA Passport No 123456789'
+    })
+  });
+
+  const payload = JSON.parse(response.body);
+  assert.equal(response.statusCode, 202);
+  assert.equal(payload.submissionId, 'passport-123');
+  assert.equal(calls[1].input.Item.submissionType, 'passport');
 });
 
 test('worker handler reads a queued submission and writes screening results', async () => {
@@ -164,10 +208,68 @@ test('worker handler reads a queued submission and writes screening results', as
   assert.equal(statusUpdates[0].TableName, 'submission-status');
   assert.match(statusUpdates[0].UpdateExpression, /warningsCount/);
   assert.equal(statusUpdates[0].ExpressionAttributeValues[':reviewStatus'], 'pass');
+  assert.equal(statusUpdates[0].ExpressionAttributeValues[':documentType'], 'driver-license');
 
   const storedResult = JSON.parse(writes[0].Body);
   assert.equal(storedResult.status, 'completed');
   assert.equal(storedResult.analysis.status, 'pass');
+});
+
+test('worker handler persists passport analysis type', async () => {
+  const writes = [];
+  const statusUpdates = [];
+  const handler = createWorkerHandler({
+    s3Client: {
+      async send(command) {
+        const name = command.constructor.name;
+        if (name === 'GetObjectCommand') {
+          return {
+            Body: JSON.stringify({
+              submissionId: 'passport-worker',
+              payload: {
+                documentType: 'passport',
+                ocrText: 'PASSPORT Passport No 123456789 Nationality USA Place of Birth CHICAGO Date of Birth 01/02/1990 Date of Issue 01/01/2020 Date of Expiry 01/01/2030 Issuing Authority UNITED STATES P<USADOE<<JANE<<<<<<<<<<<<<<<<<<<<<<< 1234567890USA9001021F3001012<<<<<<<<<<<<<<04'
+              }
+            })
+          };
+        }
+
+        if (name === 'PutObjectCommand') {
+          writes.push(command.input);
+          return {};
+        }
+
+        throw new Error(`Unexpected command: ${name}`);
+      }
+    },
+    documentClient: {
+      async send(command) {
+        statusUpdates.push(command.input);
+        return {};
+      }
+    },
+    now: () => '2026-04-13T09:10:00.000Z'
+  });
+
+  const response = await handler({
+    Records: [
+      {
+        messageId: 'msg-passport',
+        body: JSON.stringify({
+          submissionId: 'passport-worker',
+          bucket: 'intake-bucket',
+          objectKey: 'submissions/passport-worker.json',
+          resultKey: 'results/passport-worker.json',
+          tableName: 'submission-status'
+        })
+      }
+    ]
+  });
+
+  assert.deepEqual(response, { batchItemFailures: [] });
+  const storedResult = JSON.parse(writes[0].Body);
+  assert.equal(storedResult.analysis.documentType, 'passport');
+  assert.equal(statusUpdates[0].ExpressionAttributeValues[':documentType'], 'passport');
 });
 
 test('worker handler can enrich missing OCR text from the OCR extractor', async () => {
