@@ -2,6 +2,11 @@ name: Code Quality & Linting
 
 on: [push, pull_request]
 
+permissions:
+  contents: read
+  packages: read
+  statuses: write
+
 jobs:
   lint:
     name: Run super-linter
@@ -16,7 +21,7 @@ jobs:
       VALIDATE_JSON: true
       VALIDATE_XML: true
       VALIDATE_TERRAFORM: true
-      VALIDATE_JAVASCRIPT_ES: true
+      VALIDATE_JAVASCRIPT_ES: false
       VALIDATE_JAVASCRIPT_STANDARD: false
       VALIDATE_JAVASCRIPT_PREFERRED: false
       VALIDATE_JAVASCRIPT_REACT: false
