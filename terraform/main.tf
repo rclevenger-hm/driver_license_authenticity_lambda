@@ -126,13 +126,16 @@ resource "aws_s3_bucket_lifecycle_configuration" "intake_bucket_lifecycle" {
 }
 
 resource "aws_sqs_queue" "screening_dlq" {
-  name                      = "${local.queue_name}-dlq"
+  name                    = "${local.queue_name}-dlq"
+  sqs_managed_sse_enabled = true
+
   message_retention_seconds = 1209600
   tags                      = local.common_tags
 }
 
 resource "aws_sqs_queue" "screening_jobs" {
   name                       = local.queue_name
+  sqs_managed_sse_enabled    = true
   visibility_timeout_seconds = 120
   message_retention_seconds  = 345600
   tags                       = local.common_tags
@@ -148,6 +151,14 @@ resource "aws_dynamodb_table" "submissions" {
   billing_mode = "PAY_PER_REQUEST"
   hash_key     = "submissionId"
   tags         = local.common_tags
+
+  point_in_time_recovery {
+    enabled = true
+  }
+
+  server_side_encryption {
+    enabled = true
+  }
 
   attribute {
     name = "submissionId"
