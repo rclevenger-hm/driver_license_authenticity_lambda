@@ -27,8 +27,10 @@ jobs:
       VALIDATE_GO: false
 
     steps:
-      - name: Checkout code
+      - name: Checkout code with history
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Run super-linter
         uses: github/super-linter/slim@v7
