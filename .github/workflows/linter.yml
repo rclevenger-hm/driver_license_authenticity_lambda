@@ -27,8 +27,10 @@ jobs:
       VALIDATE_GO: false
       # Terraform/security policy is enforced by the dedicated Terraform
       # security workflow. Keep this broad linter focused on formatting,
-      # workflow syntax, and secret scanning rather than duplicating that gate.
+      # TFLint, workflow syntax, and secret scanning rather than duplicating
+      # policy scanners with different rule/severity behavior.
       VALIDATE_CHECKOV: false
+      VALIDATE_TERRAFORM_TERRASCAN: false
       # Duplicate-code detection is useful as a trend signal, but a zero-percent
       # threshold on small test fixtures made this workflow fail independently
       # of the repository's functional and security gates.
