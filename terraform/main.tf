@@ -130,6 +130,7 @@ resource "aws_sqs_queue" "screening_dlq" {
   sqs_managed_sse_enabled = true
 
   message_retention_seconds = 1209600
+  sqs_managed_sse_enabled   = true
   tags                      = local.common_tags
 }
 
@@ -138,6 +139,7 @@ resource "aws_sqs_queue" "screening_jobs" {
   sqs_managed_sse_enabled    = true
   visibility_timeout_seconds = 120
   message_retention_seconds  = 345600
+  sqs_managed_sse_enabled    = true
   tags                       = local.common_tags
 
   redrive_policy = jsonencode({
