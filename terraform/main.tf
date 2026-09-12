@@ -126,9 +126,7 @@ resource "aws_s3_bucket_lifecycle_configuration" "intake_bucket_lifecycle" {
 }
 
 resource "aws_sqs_queue" "screening_dlq" {
-  name                    = "${local.queue_name}-dlq"
-  sqs_managed_sse_enabled = true
-
+  name                      = "${local.queue_name}-dlq"
   message_retention_seconds = 1209600
   sqs_managed_sse_enabled   = true
   tags                      = local.common_tags
@@ -136,7 +134,6 @@ resource "aws_sqs_queue" "screening_dlq" {
 
 resource "aws_sqs_queue" "screening_jobs" {
   name                       = local.queue_name
-  sqs_managed_sse_enabled    = true
   visibility_timeout_seconds = 120
   message_retention_seconds  = 345600
   sqs_managed_sse_enabled    = true
