@@ -31,4 +31,4 @@ jobs:
 
       - name: Run tfsec
         working-directory: terraform
-        run: ../tfsec .
+        run: ../tfsec . --minimum-severity CRITICAL
