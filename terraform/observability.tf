@@ -9,6 +9,7 @@ resource "aws_cloudwatch_metric_alarm" "screening_dlq_messages" {
   comparison_operator = "GreaterThanThreshold"
   threshold           = 0
   treat_missing_data  = "notBreaching"
+  alarm_actions       = try(local.config.alarm_action_arns, [])
 
   dimensions = {
     QueueName = aws_sqs_queue.screening_dlq.name
@@ -28,6 +29,7 @@ resource "aws_cloudwatch_metric_alarm" "screening_queue_age" {
   comparison_operator = "GreaterThanThreshold"
   threshold           = 300
   treat_missing_data  = "notBreaching"
+  alarm_actions       = try(local.config.alarm_action_arns, [])
 
   dimensions = {
     QueueName = aws_sqs_queue.screening_jobs.name
@@ -47,6 +49,7 @@ resource "aws_cloudwatch_metric_alarm" "worker_errors" {
   comparison_operator = "GreaterThanThreshold"
   threshold           = 0
   treat_missing_data  = "notBreaching"
+  alarm_actions       = try(local.config.alarm_action_arns, [])
 
   dimensions = {
     FunctionName = aws_lambda_function.worker.function_name
