@@ -17,10 +17,10 @@
   "api_key_name": "driver-license-client",
   "throttle_burst_limit": 20,
   "throttle_rate_limit": 10,
+  "alarm_action_arns": [],
   "tags": {
     "project": "driver-license-authenticity",
     "managed-by": "terraform",
     "environment": "dev"
   }
 }
-  
