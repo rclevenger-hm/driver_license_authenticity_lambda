@@ -80,7 +80,7 @@ resource "aws_cloudwatch_metric_alarm" "worker_errors" {
 
 resource "aws_cloudwatch_metric_alarm" "status_errors" {
   alarm_name          = "${local.status_lambda_function_name}-errors"
-  alarm_description   = "The submission status Lambda reported one or more Lambda invocation errors."
+  alarm_description   = "The submission status Lambda reported one or more invocation errors."
   namespace           = "AWS/Lambda"
   metric_name         = "Errors"
   statistic           = "Sum"
