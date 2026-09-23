@@ -19,7 +19,7 @@ jobs:
 
       - name: Check Terraform formatting
         working-directory: terraform
-        run: terraform fmt -check=true -diff -recursive
+        run: terraform fmt -check=true -recursive
 
       - name: Install tfsec
         run: |
