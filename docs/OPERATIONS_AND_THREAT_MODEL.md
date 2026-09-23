@@ -29,6 +29,8 @@ The current infrastructure already encodes several useful safety properties:
 - Screening work is asynchronous through SQS, with a dead-letter queue after repeated failures.
 - Lambda execution is split into intake, worker, and status roles instead of one shared runtime role.
 - CloudWatch log retention is configurable rather than implicitly infinite.
+- CloudWatch alarms cover queue age, DLQ depth, Lambda errors, and API Gateway 5xx responses.
+- A Terraform-managed operations dashboard groups request-path failures, Lambda p95 duration, queue health, DLQ depth, and worker invocations/errors/throttles without exposing document payloads.
 
 These are useful controls, but they do not by themselves make the system suitable for regulated identity verification.
 
@@ -119,6 +121,18 @@ At minimum, operators should be able to answer these questions from metrics/logs
 
 Avoid using raw OCR text, names, license numbers, addresses, or document images as routine observability dimensions.
 
+### Operations dashboard
+
+Terraform provisions `${api_gateway_name}-${stage_name}-operations` as a low-cardinality CloudWatch dashboard for first-response triage. It deliberately uses infrastructure metrics rather than document-derived dimensions:
+
+- request-path 5xx and Lambda error counts;
+- p95 duration for intake, worker, and status Lambdas;
+- screening queue age and visible depth;
+- DLQ visible depth;
+- worker invocation, error, and throttle counts.
+
+Use the dashboard to establish whether an incident is primarily synchronous request-path failure, queue backlog, poison/retry behavior, or worker saturation before inspecting individual submission IDs. The dashboard complements alarms; it is not a replacement for alert routing or request-level tracing.
+
 ## DLQ incident runbook
 
 ### Trigger
@@ -168,9 +182,10 @@ Before presenting this as a production identity-verification service, evaluate a
 - WAF/request-size protections
 - audit logging that avoids PII leakage
 - deletion/retention policy and regulatory obligations
-- alarms for queue age, DLQ depth, Lambda failures, and API error rates
+- alert routing and escalation policy for the existing CloudWatch alarms
 - idempotency guarantees for retries/redrives
 - dependency failure behavior for Textract
 - formal validation of IAM least privilege
+- request-level tracing for correlating API, Lambda, queue, and worker failures
 
 The repository is strongest when these boundaries are explicit: it demonstrates an asynchronous, testable screening pipeline without overstating what the screening result proves.
