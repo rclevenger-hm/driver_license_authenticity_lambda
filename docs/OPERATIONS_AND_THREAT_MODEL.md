@@ -39,12 +39,14 @@ These are useful controls, but they do not by themselves make the system suitabl
 ### 1. Client -> API Gateway
 
 **Threats**
+
 - oversized or malformed requests
 - automated abuse / cost amplification
 - replayed submissions
 - accidental exposure of API keys
 
 **Controls / expectations**
+
 - validate payload shape before persistence
 - bound image/request size
 - use API Gateway throttling as a coarse abuse control, not as authentication
@@ -54,11 +56,13 @@ These are useful controls, but they do not by themselves make the system suitabl
 ### 2. Intake Lambda -> S3 / SQS
 
 **Threats**
+
 - partial intake where an object is written but a job is not queued
 - queue messages referring to missing or malformed objects
 - over-broad IAM permissions
 
 **Controls / expectations**
+
 - preserve a submission ID across storage, queue, result, and status records
 - make retries safe for the same submission ID
 - keep IAM actions limited to the specific bucket, queue, and table resources required by each Lambda
@@ -67,12 +71,14 @@ These are useful controls, but they do not by themselves make the system suitabl
 ### 3. Worker -> OCR / screening -> results
 
 **Threats**
+
 - poison jobs repeatedly failing
 - OCR service failures or throttling
 - malformed or adversarial image/text inputs
 - false confidence from a heuristic score
 
 **Controls / expectations**
+
 - failed jobs move to the DLQ after the configured retry count
 - screening results retain warnings/findings so operators can understand why a document was classified
 - user-facing integrations should preserve the repository's disclaimer that this is a plausibility screener
@@ -81,11 +87,13 @@ These are useful controls, but they do not by themselves make the system suitabl
 ### 4. Results / status retrieval
 
 **Threats**
+
 - enumeration of submission IDs
 - exposing another user's result
 - retaining sensitive data longer than operationally necessary
 
 **Controls / expectations**
+
 - production deployments need caller-level authorization beyond knowledge of a submission ID
 - avoid exposing S3 object locations as bearer-style access mechanisms
 - keep retention periods aligned with the actual product need and applicable policy
