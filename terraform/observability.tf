@@ -80,7 +80,7 @@ resource "aws_cloudwatch_metric_alarm" "worker_errors" {
 
 resource "aws_cloudwatch_metric_alarm" "status_errors" {
   alarm_name          = "${local.status_lambda_function_name}-errors"
-  alarm_description   = "The submission status Lambda reported one or more invocation errors."
+  alarm_description   = "The submission status Lambda reported one or more Lambda invocation errors."
   namespace           = "AWS/Lambda"
   metric_name         = "Errors"
   statistic           = "Sum"
@@ -125,17 +125,17 @@ resource "aws_cloudwatch_dashboard" "screening_pipeline" {
   dashboard_body = jsonencode({
     widgets = [
       {
-        type       = "metric"
-        x          = 0
-        y          = 0
-        width      = 12
-        height     = 6
+        type   = "metric"
+        x      = 0
+        y      = 0
+        width  = 12
+        height = 6
         properties = {
-          title   = "Request path failures"
-          view    = "timeSeries"
-          region  = local.region
-          stat    = "Sum"
-          period  = 300
+          title  = "Request path failures"
+          view   = "timeSeries"
+          region = local.region
+          stat   = "Sum"
+          period = 300
           metrics = [
             ["AWS/ApiGateway", "5XXError", "ApiName", aws_api_gateway_rest_api.driver_license_api.name, "Stage", aws_api_gateway_stage.driver_license_api_stage.stage_name],
             ["AWS/Lambda", "Errors", "FunctionName", aws_lambda_function.intake.function_name],
@@ -144,17 +144,17 @@ resource "aws_cloudwatch_dashboard" "screening_pipeline" {
         }
       },
       {
-        type       = "metric"
-        x          = 12
-        y          = 0
-        width      = 12
-        height     = 6
+        type   = "metric"
+        x      = 12
+        y      = 0
+        width  = 12
+        height = 6
         properties = {
-          title   = "Lambda duration"
-          view    = "timeSeries"
-          region  = local.region
-          stat    = "p95"
-          period  = 300
+          title  = "Lambda duration"
+          view   = "timeSeries"
+          region = local.region
+          stat   = "p95"
+          period = 300
           metrics = [
             ["AWS/Lambda", "Duration", "FunctionName", aws_lambda_function.intake.function_name],
             ["AWS/Lambda", "Duration", "FunctionName", aws_lambda_function.worker.function_name],
@@ -163,16 +163,16 @@ resource "aws_cloudwatch_dashboard" "screening_pipeline" {
         }
       },
       {
-        type       = "metric"
-        x          = 0
-        y          = 6
-        width      = 12
-        height     = 6
+        type   = "metric"
+        x      = 0
+        y      = 6
+        width  = 12
+        height = 6
         properties = {
-          title   = "Screening queue health"
-          view    = "timeSeries"
-          region  = local.region
-          period  = 300
+          title  = "Screening queue health"
+          view   = "timeSeries"
+          region = local.region
+          period = 300
           metrics = [
             ["AWS/SQS", "ApproximateAgeOfOldestMessage", "QueueName", aws_sqs_queue.screening_jobs.name, { stat = "Maximum" }],
             ["AWS/SQS", "ApproximateNumberOfMessagesVisible", "QueueName", aws_sqs_queue.screening_jobs.name, { stat = "Maximum" }]
@@ -180,33 +180,33 @@ resource "aws_cloudwatch_dashboard" "screening_pipeline" {
         }
       },
       {
-        type       = "metric"
-        x          = 12
-        y          = 6
-        width      = 12
-        height     = 6
+        type   = "metric"
+        x      = 12
+        y      = 6
+        width  = 12
+        height = 6
         properties = {
-          title   = "Dead-letter queue"
-          view    = "timeSeries"
-          region  = local.region
-          period  = 300
+          title  = "Dead-letter queue"
+          view   = "timeSeries"
+          region = local.region
+          period = 300
           metrics = [
             ["AWS/SQS", "ApproximateNumberOfMessagesVisible", "QueueName", aws_sqs_queue.screening_dlq.name, { stat = "Maximum" }]
           ]
         }
       },
       {
-        type       = "metric"
-        x          = 0
-        y          = 12
-        width      = 24
-        height     = 6
+        type   = "metric"
+        x      = 0
+        y      = 12
+        width  = 24
+        height = 6
         properties = {
-          title   = "Asynchronous worker reliability"
-          view    = "timeSeries"
-          region  = local.region
-          stat    = "Sum"
-          period  = 300
+          title  = "Asynchronous worker reliability"
+          view   = "timeSeries"
+          region = local.region
+          stat   = "Sum"
+          period = 300
           metrics = [
             ["AWS/Lambda", "Invocations", "FunctionName", aws_lambda_function.worker.function_name],
             ["AWS/Lambda", "Errors", "FunctionName", aws_lambda_function.worker.function_name],
