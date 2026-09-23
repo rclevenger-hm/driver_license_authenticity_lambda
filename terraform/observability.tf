@@ -118,3 +118,102 @@ resource "aws_cloudwatch_metric_alarm" "api_5xx_errors" {
 
   tags = local.common_tags
 }
+
+resource "aws_cloudwatch_dashboard" "screening_pipeline" {
+  dashboard_name = "${local.api_gateway_name}-${local.stage_name}-operations"
+
+  dashboard_body = jsonencode({
+    widgets = [
+      {
+        type   = "metric"
+        x      = 0
+        y      = 0
+        width  = 12
+        height = 6
+        properties = {
+          title  = "Request path failures"
+          view   = "timeSeries"
+          region = local.region
+          stat   = "Sum"
+          period = 300
+          metrics = [
+            ["AWS/ApiGateway", "5XXError", "ApiName", aws_api_gateway_rest_api.driver_license_api.name, "Stage", aws_api_gateway_stage.driver_license_api_stage.stage_name],
+            ["AWS/Lambda", "Errors", "FunctionName", aws_lambda_function.intake.function_name],
+            ["AWS/Lambda", "Errors", "FunctionName", aws_lambda_function.status.function_name]
+          ]
+        }
+      },
+      {
+        type   = "metric"
+        x      = 12
+        y      = 0
+        width  = 12
+        height = 6
+        properties = {
+          title  = "Lambda duration"
+          view   = "timeSeries"
+          region = local.region
+          stat   = "p95"
+          period = 300
+          metrics = [
+            ["AWS/Lambda", "Duration", "FunctionName", aws_lambda_function.intake.function_name],
+            ["AWS/Lambda", "Duration", "FunctionName", aws_lambda_function.worker.function_name],
+            ["AWS/Lambda", "Duration", "FunctionName", aws_lambda_function.status.function_name]
+          ]
+        }
+      },
+      {
+        type   = "metric"
+        x      = 0
+        y      = 6
+        width  = 12
+        height = 6
+        properties = {
+          title  = "Screening queue health"
+          view   = "timeSeries"
+          region = local.region
+          period = 300
+          metrics = [
+            ["AWS/SQS", "ApproximateAgeOfOldestMessage", "QueueName", aws_sqs_queue.screening_jobs.name, { stat = "Maximum" }],
+            ["AWS/SQS", "ApproximateNumberOfMessagesVisible", "QueueName", aws_sqs_queue.screening_jobs.name, { stat = "Maximum" }]
+          ]
+        }
+      },
+      {
+        type   = "metric"
+        x      = 12
+        y      = 6
+        width  = 12
+        height = 6
+        properties = {
+          title  = "Dead-letter queue"
+          view   = "timeSeries"
+          region = local.region
+          period = 300
+          metrics = [
+            ["AWS/SQS", "ApproximateNumberOfMessagesVisible", "QueueName", aws_sqs_queue.screening_dlq.name, { stat = "Maximum" }]
+          ]
+        }
+      },
+      {
+        type   = "metric"
+        x      = 0
+        y      = 12
+        width  = 24
+        height = 6
+        properties = {
+          title  = "Asynchronous worker reliability"
+          view   = "timeSeries"
+          region = local.region
+          stat   = "Sum"
+          period = 300
+          metrics = [
+            ["AWS/Lambda", "Invocations", "FunctionName", aws_lambda_function.worker.function_name],
+            ["AWS/Lambda", "Errors", "FunctionName", aws_lambda_function.worker.function_name],
+            ["AWS/Lambda", "Throttles", "FunctionName", aws_lambda_function.worker.function_name]
+          ]
+        }
+      }
+    ]
+  })
+}
