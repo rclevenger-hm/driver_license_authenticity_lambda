@@ -125,11 +125,11 @@ resource "aws_cloudwatch_dashboard" "screening_pipeline" {
   dashboard_body = jsonencode({
     widgets = [
       {
-        type   = "metric"
-        x      = 0
-        y      = 0
-        width  = 12
-        height = 6
+        type       = "metric"
+        x          = 0
+        y          = 0
+        width      = 12
+        height     = 6
         properties = {
           title   = "Request path failures"
           view    = "timeSeries"
@@ -144,17 +144,17 @@ resource "aws_cloudwatch_dashboard" "screening_pipeline" {
         }
       },
       {
-        type   = "metric"
-        x      = 12
-        y      = 0
-        width  = 12
-        height = 6
+        type       = "metric"
+        x          = 12
+        y          = 0
+        width      = 12
+        height     = 6
         properties = {
-          title  = "Lambda duration"
-          view   = "timeSeries"
-          region = local.region
-          stat   = "p95"
-          period = 300
+          title   = "Lambda duration"
+          view    = "timeSeries"
+          region  = local.region
+          stat    = "p95"
+          period  = 300
           metrics = [
             ["AWS/Lambda", "Duration", "FunctionName", aws_lambda_function.intake.function_name],
             ["AWS/Lambda", "Duration", "FunctionName", aws_lambda_function.worker.function_name],
@@ -163,44 +163,44 @@ resource "aws_cloudwatch_dashboard" "screening_pipeline" {
         }
       },
       {
-        type   = "metric"
-        x      = 0
-        y      = 6
-        width  = 12
-        height = 6
+        type       = "metric"
+        x          = 0
+        y          = 6
+        width      = 12
+        height     = 6
         properties = {
-          title  = "Screening queue health"
-          view   = "timeSeries"
-          region = local.region
-          period = 300
+          title   = "Screening queue health"
+          view    = "timeSeries"
+          region  = local.region
+          period  = 300
           metrics = [
-            ["AWS/SQS", "ApproximateAgeOfOldestMessage", "QueueName", aws_sqs_queue.screening_jobs.name, { "stat" = "Maximum" }],
-            ["AWS/SQS", "ApproximateNumberOfMessagesVisible", "QueueName", aws_sqs_queue.screening_jobs.name, { "stat" = "Maximum" }]
+            ["AWS/SQS", "ApproximateAgeOfOldestMessage", "QueueName", aws_sqs_queue.screening_jobs.name, { stat = "Maximum" }],
+            ["AWS/SQS", "ApproximateNumberOfMessagesVisible", "QueueName", aws_sqs_queue.screening_jobs.name, { stat = "Maximum" }]
           ]
         }
       },
       {
-        type   = "metric"
-        x      = 12
-        y      = 6
-        width  = 12
-        height = 6
+        type       = "metric"
+        x          = 12
+        y          = 6
+        width      = 12
+        height     = 6
         properties = {
-          title  = "Dead-letter queue"
-          view   = "timeSeries"
-          region = local.region
-          period = 300
+          title   = "Dead-letter queue"
+          view    = "timeSeries"
+          region  = local.region
+          period  = 300
           metrics = [
-            ["AWS/SQS", "ApproximateNumberOfMessagesVisible", "QueueName", aws_sqs_queue.screening_dlq.name, { "stat" = "Maximum" }]
+            ["AWS/SQS", "ApproximateNumberOfMessagesVisible", "QueueName", aws_sqs_queue.screening_dlq.name, { stat = "Maximum" }]
           ]
         }
       },
       {
-        type   = "metric"
-        x      = 0
-        y      = 12
-        width  = 24
-        height = 6
+        type       = "metric"
+        x          = 0
+        y          = 12
+        width      = 24
+        height     = 6
         properties = {
           title   = "Asynchronous worker reliability"
           view    = "timeSeries"
