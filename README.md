@@ -273,7 +273,7 @@ AWS infrastructure for the async pipeline.
 
 The next high-value upgrades would be:
 
-1. Add a status lookup endpoint so clients can retrieve results by `submissionId`.
+1. Add request-level tracing and API access logging so intake, status lookup, and worker failures can be correlated end to end.
 2. Store original binary uploads instead of only a JSON envelope when images are posted to the API.
 3. Add Textract, Rekognition, or another OCR stage before scoring.
 4. Parse PDF417 barcodes for AAMVA-compatible licenses.
