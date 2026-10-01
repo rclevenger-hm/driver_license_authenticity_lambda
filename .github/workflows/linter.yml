@@ -43,4 +43,5 @@ jobs:
           fetch-depth: 0
 
       - name: Run super-linter
-        uses: github/super-linter/slim@v7
+        # v7.4.0 handles new branches created at a merge commit with no new commits.
+        uses: super-linter/super-linter/slim@v7.4.0
