@@ -5,6 +5,7 @@ const dynalite = require("dynalite");
 const {
   DynamoDBClient,
   CreateTableCommand,
+  waitUntilTableExists,
 } = require("@aws-sdk/client-dynamodb");
 const { DynamoDBDocumentClient } = require("@aws-sdk/lib-dynamodb");
 const { createIntakeHandler } = require("../intake-handler");
@@ -84,6 +85,12 @@ async function harness(t) {
         },
       ],
     }),
+  );
+  // CreateTable returns before the emulator's asynchronous ACTIVE transition.
+  // Wait just as a client of the real DynamoDB service must after provisioning.
+  await waitUntilTableExists(
+    { client, maxWaitTime: 10, minDelay: 1, maxDelay: 1 },
+    { TableName: "submissions" },
   );
   const objects = new Map();
   const sent = [];
