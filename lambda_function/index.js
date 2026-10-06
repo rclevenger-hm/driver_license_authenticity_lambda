@@ -1,4 +1,4 @@
-'use strict';
+"use strict";
 
 const {
   analyzeDocument,
@@ -6,11 +6,12 @@ const {
   inspectImage,
   inspectOcrText,
   normalizeInvocationEvent,
-  normalizePayload
-} = require('./screening');
+  normalizePayload,
+} = require("./screening");
 
 const DEFAULT_HEADERS = {
-  'Content-Type': 'application/json'
+  "Content-Type": "application/json",
+  "Cache-Control": "no-store",
 };
 
 async function handler(event = {}) {
@@ -23,8 +24,8 @@ async function handler(event = {}) {
     const statusCode = error.statusCode || 400;
 
     return jsonResponse(statusCode, {
-      error: error.message || 'Unable to evaluate document payload',
-      recommendation: 'Provide OCR text, base64 image data, or both.'
+      error: error.message || "Unable to evaluate document payload",
+      recommendation: "Provide OCR text, base64 image data, or both.",
     });
   }
 }
@@ -33,7 +34,7 @@ function jsonResponse(statusCode, body) {
   return {
     statusCode,
     headers: DEFAULT_HEADERS,
-    body: JSON.stringify(body)
+    body: JSON.stringify(body),
   };
 }
 
@@ -45,5 +46,5 @@ module.exports = {
   inspectOcrText,
   jsonResponse,
   normalizeInvocationEvent,
-  normalizePayload
+  normalizePayload,
 };

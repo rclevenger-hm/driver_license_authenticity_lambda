@@ -4,8 +4,9 @@ services:
       context: .
       dockerfile: Dockerfile
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"
     environment:
       PORT: 3000
+      LOCAL_BIND_HOST: 0.0.0.0
     volumes:
       - ./lambda_function:/app

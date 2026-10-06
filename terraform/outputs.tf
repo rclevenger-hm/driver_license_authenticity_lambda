@@ -42,3 +42,34 @@ output "api_key_id" {
   description = "API Gateway API key identifier for clients."
   value       = aws_api_gateway_api_key.driver_license_client.id
 }
+
+
+output "screening_dlq_url" {
+  description = "Dead-letter queue for failed screening jobs."
+  value       = aws_sqs_queue.screening_dlq.id
+}
+
+output "client_invoke_policy" {
+  description = "Attach to each approved IAM caller; separate consumers need separate users or roles."
+  value = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect = "Allow"
+      Action = "execute-api:Invoke"
+      Resource = [
+        "${aws_api_gateway_rest_api.driver_license_api.execution_arn}/${local.stage_name}/POST/${local.api_resource_path}",
+        "${aws_api_gateway_rest_api.driver_license_api.execution_arn}/${local.stage_name}/GET/submissions/*"
+      ]
+    }]
+  })
+}
+
+output "verification_environment" {
+  description = "Environment tag checked by the disposable-stack verification script."
+  value       = try(local.common_tags.environment, "unspecified")
+}
+
+output "aws_region" {
+  description = "Deployment region used for signed requests and verification."
+  value       = local.region
+}

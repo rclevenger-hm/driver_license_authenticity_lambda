@@ -1,6 +1,6 @@
 # Operations documentation
 
-The application README describes the request flow, local development, and Terraform deployment. These documents focus on how the system should be operated and reviewed as an asynchronous workload that handles sensitive identity-document data.
+The application readme describes the request flow, local development, and Terraform deployment. These documents focus on how the system should be operated and reviewed as an asynchronous workload that handles sensitive identity-document data.
 
 - [Operations and threat model](OPERATIONS_AND_THREAT_MODEL.md) — trust boundaries, current Terraform controls, PII lifecycle, operational signals, DLQ recovery, and production-readiness gaps.
 
@@ -15,3 +15,9 @@ The repository already includes asynchronous intake, binary S3 uploads, SQS work
 5. Add an explicit deletion workflow and verify retention behavior for sensitive document uploads.
 
 These steps keep the project honest about its current scope: a plausibility-screening pipeline with production-oriented architecture, not a legal identity-verification service.
+
+## Reliability and caller access
+
+See [RELIABILITY_AND_ACCESS.md](RELIABILITY_AND_ACCESS.md) for the signed API
+contract, idempotency, pending dispatch recovery, worker leases, coordinated
+migration, and real AWS verification.

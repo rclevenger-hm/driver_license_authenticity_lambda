@@ -1,284 +1,137 @@
 # Identity Document Async Intake Pipeline
 
-This project is now structured as an asynchronous intake system for identity document screening.
+An AWS Lambda service for asynchronous driver-license and passport plausibility
+screening. It stores submissions in S3, dispatches work through SQS, processes it
+with a leased worker, and exposes caller-owned status in DynamoDB.
 
-Instead of trying to do everything in a single request, the API accepts a submission, stores it in S3, places a job on SQS, and lets a worker Lambda process the document in the background. That gives the project a much more production-friendly shape for retries, throughput spikes, and longer-running enrichment later.
+The screening engine checks image metadata, document keywords, basic dates, and
+supplied AAMVA/PDF417 text. It can use Textract when an image has no supplied OCR
+text. Its score is a heuristic, not proof of identity, authenticity, or issuance.
 
-The pipeline now supports both `driver-license` and `passport` submissions.
+## API contract
 
-When an image is included, the intake flow stores the original upload as a binary object in S3 and keeps the submission JSON as metadata plus references.
+Both routes require an **IAM-signed request** and the `x-api-key` header. Grant
+clients the policy from `terraform output -raw client_invoke_policy`. Separate
+consumers need separate IAM users or roles; role sessions share ownership.
 
-## Architecture
+- `POST /validate-license`: submit a document with an `Idempotency-Key` header.
+- `GET /submissions/{submissionId}`: retrieve only the caller's own submission.
 
-```text
-Client
-  -> API Gateway
-  -> Intake Lambda
-  -> S3 intake bucket (submission JSON)
-  -> SQS screening queue
-  -> Worker Lambda
-  -> S3 results prefix (screening output JSON)
-```
+Use the same idempotency key and payload when retrying an ambiguous request.
+A conflicting payload returns 409. Foreign, missing, and ownerless submissions
+return the same 404 response. Internal S3 locations and lease details are not
+returned by the API.
 
-### Components
-
-`intake-handler.js`
-Receives API requests, validates the payload, writes the submission to S3, and enqueues a screening job.
-
-`worker-handler.js`
-Consumes SQS messages, loads the stored submission from S3, optionally runs Textract OCR when text is missing, runs the screening engine, and writes the result back to S3.
-
-`screening.js`
-Shared screening engine that scores OCR text and image metadata for plausibility.
-
-`server.js`
-Local HTTP wrapper around the intake handler for quick development.
-
-## What the API does now
-
-`POST /validate-license` no longer returns the screening decision immediately.
-
-It now returns a queued job response like:
+Example body:
 
 ```json
 {
-  "submissionId": "7f5f2a6d-3d3e-4c26-9f44-efdf5dd6e6e9",
-  "status": "queued",
-  "submittedAt": "2026-04-12T12:00:00.000Z",
-  "queue": "screening",
-  "submissionLocation": "s3://driver-license-authenticity-intake/submissions/7f5f2a6d-3d3e-4c26-9f44-efdf5dd6e6e9.json",
-  "resultLocation": "s3://driver-license-authenticity-intake/results/7f5f2a6d-3d3e-4c26-9f44-efdf5dd6e6e9.json"
+  "documentType": "driver-license",
+  "imageBase64": "<base64-encoded image>",
+  "ocrText": "<optional supplied document text>",
+  "metadata": { "stateCode": "CA" }
 }
 ```
 
-The screening result is written by the worker Lambda to the `results/` prefix in the same bucket.
+Supported document types are `driver-license` and `passport`. At least one of
+`imageBase64`, `ocrText`, or `barcodeData` is required. Existing aliases `image`,
+`documentImageBase64`, `text`, `extractedText`, and `pdf417Data` remain supported.
+Request bodies are limited to 5 MiB before storage.
 
-Submission status is also persisted in DynamoDB and can be retrieved through:
+An accepted submission returns HTTP 202:
 
-```text
-GET /submissions/{submissionId}
+```json
+{
+  "submissionId": "<64-character submission ID>",
+  "status": "queued",
+  "submissionType": "driver-license",
+  "submittedAt": "2026-10-06T00:00:00.000Z",
+  "lastUpdatedAt": "2026-10-06T00:00:00.000Z",
+  "statusEndpoint": "/submissions/<submission ID>"
+}
 ```
 
-The status record now keeps searchable operational fields such as `status`, `reviewStatus`, `lastUpdatedAt`, `processedAt`, `warningsCount`, `findingsCount`, and source-data hints for audit and queue monitoring.
+A response can instead report `dispatch_pending` when data is durably accepted
+but enqueueing needs recovery. A scheduled reconciler retries automatically.
+Status progresses through `queued`, `processing`, and `completed`, with `retrying`
+and `failed` for processing failures. `reviewStatus` separately contains the
+screening engine's `pass`, `review`, or `reject` result. A completed replay returns
+HTTP 200 and the original submission ID.
 
-All API Gateway routes are protected by an API key and attached to a throttled usage plan. Clients must send the `x-api-key` header when calling the deployed API.
+## Reliability
 
-## Request payload
+- Immutable S3 objects and conditional DynamoDB creation isolate concurrent
+  submissions using the same key.
+- Pending dispatch records survive SQS outages and ambiguous enqueue responses.
+- Conditional leases prevent concurrent workers from publishing conflicting
+  results; completed deliveries are acknowledged without reprocessing.
+- SQS partial batch responses preserve failed work for retry and DLQ handling.
+- Workers load resource locations from trusted configuration and durable state.
+- IAM permissions explicitly cover upload writes and reads under `uploads/`.
+- Upload/submission/result lifecycle rules include noncurrent object expiration.
 
-Supported fields:
+Read [reliability, authentication, migration, and AWS verification](docs/RELIABILITY_AND_ACCESS.md)
+before upgrading an existing deployment. This release requires client and queue
+migration; old ownerless submissions are not automatically exposed.
 
-- `documentType`
-- `imageBase64`
-- `image`
-- `documentImageBase64`
-- `ocrText`
-- `text`
-- `extractedText`
-- `barcodeData`
-- `pdf417Data`
-- `metadata.stateCode`
+## Development
 
-Supported `documentType` values:
-
-- `driver-license`
-- `passport`
-
-At least one of `imageBase64`, `ocrText`, or `barcodeData` is required.
-
-Example request:
-
-```bash
-curl -X POST http://localhost:3000/validate-license \
-  -H "Content-Type: application/json" \
-  -d '{
-    "documentType": "driver-license",
-    "imageBase64": "iVBORw0KGgoAAAANSUhEUgAAAlgAAAGQCAIAAAD9V4Q6AAAACXBIWXMAAAsSAAALEgHS3X78AAAAHUlEQVR4nO3BMQEAAADCoPVPbQ0PoAAAAAAAAAAA4GEwQAABiwCo9QAAAABJRU5ErkJggg==",
-    "ocrText": "DRIVER LICENSE CA DL NUMBER D1234567 DOB 01/02/1990 ISSUED 01/01/2020 EXPIRES 01/01/2028 ADDRESS 123 MAIN ST CLASS C"
-  }'
-```
-
-## Screening behavior
-
-The worker uses the shared screening engine to score document plausibility based on:
-
-- Image type support for PNG, JPEG, and GIF
-- Resolution and document-type-appropriate aspect ratio
-- Suspiciously tiny payload size
-- Driver-license or passport OCR keywords
-- Parsed AAMVA or PDF417 barcode payloads when available
-- Presence of expected document fields
-- U.S. state detection for licenses
-- MRZ-style passport text detection
-- Basic date chronology checks
-
-The result is a structured JSON object with:
-
-- `status`: `pass`, `review`, or `reject`
-- `score`: `0-100`
-- `summary`
-- `findings`
-- `warnings`
-- `imageAnalysis`
-- `textAnalysis`
-- `disclaimer`
-
-This is still a plausibility screener, not a legal proof of authenticity.
-
-## Local development
-
-Install dependencies:
+Use Node.js 22, matching the deployed runtimes and CI:
 
 ```bash
 cd lambda_function
-npm install
-```
-
-Run tests:
-
-```bash
-cd lambda_function
+npm ci
 npm test
-```
-
-Run the lightweight end-to-end smoke path:
-
-```bash
-cd lambda_function
 npm run smoke
 ```
 
-Run the local intake server:
+Tests use a local DynamoDB emulator and mock S3/SQS transports. They cover intake,
+concurrency, idempotency, failure recovery, processing leases, and caller access.
+The smoke command runs the owned intake-to-status flow without AWS credentials.
 
-```bash
-cd lambda_function
-set INTAKE_BUCKET_NAME=local-intake
-set INTAKE_QUEUE_URL=http://localhost/fake-queue
-npm start
-```
+The optional HTTP wrapper (`npm start`) binds to loopback. To use it against a
+development AWS stack, configure `INTAKE_BUCKET_NAME`, `INTAKE_QUEUE_URL`, and
+`SUBMISSION_TABLE_NAME`, plus an explicit `LOCAL_CALLER_ARN` such as
+`arn:aws:iam::111122223333:user/local-developer`. This is a fixed development
+identity, not authentication. Without it, requests fail closed. Never expose this
+wrapper as a public gateway. HTTP clients must still send `Idempotency-Key`.
 
-Note:
-The local server executes the intake handler, so without real AWS credentials and infrastructure it is mainly useful for request-shape testing. The unit tests cover the S3 and SQS interactions with mocked clients.
+## Deployment
 
-## AWS credentials
+Configure AWS credentials through a named profile or IAM Identity Center. Never
+commit credentials, API-key values, document images, or real OCR text.
 
-AWS credentials are not stored in this repository.
-
-Before running Terraform or exercising the intake handler against real AWS services, configure credentials on your machine using one of these common paths.
-
-### Option 1: `aws configure`
-
-If you use long-lived access keys:
-
-```bash
-aws configure
-```
-
-You will be prompted for:
-
-- AWS Access Key ID
-- AWS Secret Access Key
-- Default region name
-- Default output format
-
-Example:
-
-```text
-AWS Access Key ID [None]: AKIA...
-AWS Secret Access Key [None]: ...
-Default region name [None]: us-east-1
-Default output format [None]: json
-```
-
-### Option 2: AWS SSO
-
-If your organization uses AWS IAM Identity Center or AWS SSO:
-
-```bash
-aws configure sso
-```
-
-After you complete setup, authenticate with:
-
-```bash
-aws sso login
-```
-
-If you use a named profile, you can run Terraform with it like this:
-
-```bash
-$env:AWS_PROFILE="your-profile-name"
-```
-
-### Verify credentials
-
-Before deploying, confirm that your local AWS CLI session is working:
-
-```bash
-aws sts get-caller-identity
-```
-
-That command should return your AWS account, user, or role identity.
-
-### Important note
-
-Do not put AWS secrets in this repository, in `terraform/config.json`, or in committed `.env` files. Use the AWS CLI credential store, environment variables, SSO, or an assumed role instead.
-
-## Terraform deployment
-
-Terraform provisions:
-
-- An S3 bucket for submissions and results
-- An SQS queue plus dead-letter queue
-- A DynamoDB table for submission status
-- An intake Lambda
-- A worker Lambda
-- A status lookup Lambda
-- An event source mapping from SQS to the worker
-- API Gateway for the intake endpoint
-- IAM roles and policies for each Lambda
-
-Terraform also runs `npm ci --omit=dev` in `lambda_function/` before packaging so the Lambda bundle includes the AWS SDK clients it depends on.
-The stack now supports configurable name suffixes, resource tags, S3 retention rules, and CloudWatch log retention settings through `terraform/config.json`.
-
-Before deploying:
-
-1. Install Terraform.
-2. Configure AWS credentials using the section above.
-3. Review and customize `terraform/config.json`, especially the bucket and function names.
-
-Deploy:
+Review `terraform/config.json` for unique names, region, environment tags,
+retention, throttling, and alarm routing. Then:
 
 ```bash
 cd terraform
 terraform init
+terraform fmt -check -recursive
+terraform validate
+terraform test
+terraform plan
 terraform apply
 ```
 
-Destroy:
+Terraform 1.7 or newer is required for the mock-provider tests. The deployment
+packages production dependencies and provisions API Gateway, four Lambdas
+(intake, worker, status, and reconciliation), private S3 storage, DynamoDB,
+SQS/DLQ, scheduled dispatch, IAM policies, alarms, and an operations dashboard.
+Application dependencies are installed with `npm ci --omit=dev` before packaging;
+run `npm ci` again before running local tests afterward.
 
-```bash
-cd terraform
-terraform destroy
-```
+A real upload/retry/DLQ verification harness is available through `npm run verify:aws`.
+See the [isolated-stack instructions](docs/RELIABILITY_AND_ACCESS.md#live-aws-verification).
+It requires AWS credentials and takes roughly 30 minutes to exercise retry exhaustion.
 
-## Project layout
+## Documentation
 
-`lambda_function/`
-Application code, AWS handlers, local server, and tests.
-
-`terraform/`
-AWS infrastructure for the async pipeline.
-
-## Good next steps
-
-The next high-value upgrades would be:
-
-1. Add request-level tracing and API access logging so intake, status lookup, and worker failures can be correlated end-to-end.
-2. Store original binary uploads instead of only a JSON envelope when images are posted to the API.
-3. Add Textract, Rekognition, or another OCR stage before scoring.
-4. Parse PDF417 barcodes for AAMVA-compatible licenses.
-5. Persist analyst review feedback to calibrate scoring over time.
+- [Documentation index](docs/README.md)
+- [Reliability and access](docs/RELIABILITY_AND_ACCESS.md)
+- [Operations and threat model](docs/OPERATIONS_AND_THREAT_MODEL.md)
+- [Roadmap](docs/ROADMAP.md)
 
 ## License
 
-This project is licensed under the MIT License. See [LICENSE](LICENSE) for details.
+[MIT](LICENSE).
