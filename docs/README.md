@@ -1,6 +1,6 @@
 # Operations documentation
 
-The application README describes the request flow, local development, and Terraform deployment. These documents focus on how the system should be operated and reviewed as an asynchronous workload that handles sensitive identity-document data.
+The application readme describes the request flow, local development, and Terraform deployment. These documents focus on how the system should be operated and reviewed as an asynchronous workload that handles sensitive identity-document data.
 
 - [Operations and threat model](OPERATIONS_AND_THREAT_MODEL.md) — trust boundaries, current Terraform controls, PII lifecycle, operational signals, DLQ recovery, and production-readiness gaps.
 
