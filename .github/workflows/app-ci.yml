@@ -62,3 +62,6 @@ jobs:
 
       - name: Terraform validate
         run: terraform validate
+
+      - name: Terraform infrastructure contract tests
+        run: terraform test

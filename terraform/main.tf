@@ -37,6 +37,10 @@ locals {
   throttle_rate_limit         = try(local.config.throttle_rate_limit, 10)
   submission_prefix           = "submissions"
   result_prefix               = "results"
+  upload_prefix               = "uploads"
+  worker_timeout_seconds      = 60
+  worker_lease_seconds        = 90
+  max_receive_count           = 5
   common_tags                 = try(local.config.tags, {})
 }
 
@@ -109,6 +113,23 @@ resource "aws_s3_bucket_lifecycle_configuration" "intake_bucket_lifecycle" {
     expiration {
       days = local.submission_retention_days
     }
+    noncurrent_version_expiration {
+      noncurrent_days = 1
+    }
+  }
+
+  rule {
+    id     = "expire-uploads"
+    status = "Enabled"
+    filter {
+      prefix = "${local.upload_prefix}/"
+    }
+    expiration {
+      days = local.submission_retention_days
+    }
+    noncurrent_version_expiration {
+      noncurrent_days = 1
+    }
   }
 
   rule {
@@ -122,6 +143,9 @@ resource "aws_s3_bucket_lifecycle_configuration" "intake_bucket_lifecycle" {
     expiration {
       days = local.result_retention_days
     }
+    noncurrent_version_expiration {
+      noncurrent_days = 1
+    }
   }
 }
 
@@ -134,14 +158,14 @@ resource "aws_sqs_queue" "screening_dlq" {
 
 resource "aws_sqs_queue" "screening_jobs" {
   name                       = local.queue_name
-  visibility_timeout_seconds = 120
+  visibility_timeout_seconds = 6 * local.worker_timeout_seconds
   message_retention_seconds  = 345600
   sqs_managed_sse_enabled    = true
   tags                       = local.common_tags
 
   redrive_policy = jsonencode({
     deadLetterTargetArn = aws_sqs_queue.screening_dlq.arn
-    maxReceiveCount     = 5
+    maxReceiveCount     = local.max_receive_count
   })
 }
 
@@ -257,7 +281,7 @@ resource "aws_iam_role_policy_attachment" "intake_basic_execution" {
 
 resource "aws_iam_role_policy_attachment" "worker_sqs_execution" {
   role       = aws_iam_role.worker_lambda_execution.name
-  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaSQSQueueExecutionRole"
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
 }
 
 resource "aws_iam_role_policy_attachment" "status_basic_execution" {
@@ -277,7 +301,8 @@ resource "aws_iam_policy" "intake_pipeline_access" {
           "s3:PutObject"
         ]
         Resource = [
-          "${aws_s3_bucket.intake_bucket.arn}/${local.submission_prefix}/*"
+          "${aws_s3_bucket.intake_bucket.arn}/${local.submission_prefix}/*",
+          "${aws_s3_bucket.intake_bucket.arn}/${local.upload_prefix}/*"
         ]
       },
       {
@@ -290,7 +315,9 @@ resource "aws_iam_policy" "intake_pipeline_access" {
       {
         Effect = "Allow"
         Action = [
-          "dynamodb:PutItem"
+          "dynamodb:PutItem",
+          "dynamodb:GetItem",
+          "dynamodb:UpdateItem"
         ]
         Resource = aws_dynamodb_table.submissions.arn
       }
@@ -310,7 +337,8 @@ resource "aws_iam_policy" "worker_pipeline_access" {
           "s3:GetObject"
         ]
         Resource = [
-          "${aws_s3_bucket.intake_bucket.arn}/${local.submission_prefix}/*"
+          "${aws_s3_bucket.intake_bucket.arn}/${local.submission_prefix}/*",
+          "${aws_s3_bucket.intake_bucket.arn}/${local.upload_prefix}/*"
         ]
       },
       {
@@ -325,9 +353,15 @@ resource "aws_iam_policy" "worker_pipeline_access" {
       {
         Effect = "Allow"
         Action = [
-          "dynamodb:UpdateItem"
+          "dynamodb:UpdateItem",
+          "dynamodb:GetItem"
         ]
         Resource = aws_dynamodb_table.submissions.arn
+      },
+      {
+        Effect   = "Allow"
+        Action   = ["sqs:ReceiveMessage", "sqs:DeleteMessage", "sqs:GetQueueAttributes"]
+        Resource = aws_sqs_queue.screening_jobs.arn
       },
       {
         Effect = "Allow"
@@ -374,7 +408,7 @@ resource "aws_iam_role_policy_attachment" "status_pipeline_access" {
 
 resource "aws_lambda_function" "intake" {
   function_name    = local.intake_lambda_function_name
-  runtime          = "nodejs20.x"
+  runtime          = "nodejs22.x"
   handler          = "intake-handler.handler"
   filename         = data.archive_file.lambda_zip.output_path
   source_code_hash = data.archive_file.lambda_zip.output_base64sha256
@@ -388,6 +422,7 @@ resource "aws_lambda_function" "intake" {
       INTAKE_BUCKET_NAME    = aws_s3_bucket.intake_bucket.bucket
       INTAKE_QUEUE_URL      = aws_sqs_queue.screening_jobs.id
       SUBMISSION_TABLE_NAME = aws_dynamodb_table.submissions.name
+      UPLOAD_PREFIX         = local.upload_prefix
       SUBMISSION_PREFIX     = local.submission_prefix
       RESULT_PREFIX         = local.result_prefix
     }
@@ -398,12 +433,12 @@ resource "aws_lambda_function" "intake" {
 
 resource "aws_lambda_function" "worker" {
   function_name    = local.worker_lambda_function_name
-  runtime          = "nodejs20.x"
+  runtime          = "nodejs22.x"
   handler          = "worker-handler.handler"
   filename         = data.archive_file.lambda_zip.output_path
   source_code_hash = data.archive_file.lambda_zip.output_base64sha256
   role             = aws_iam_role.worker_lambda_execution.arn
-  timeout          = 60
+  timeout          = local.worker_timeout_seconds
   memory_size      = 256
 
   environment {
@@ -412,6 +447,9 @@ resource "aws_lambda_function" "worker" {
       RESULT_PREFIX         = local.result_prefix
       SUBMISSION_TABLE_NAME = aws_dynamodb_table.submissions.name
       ENABLE_TEXTRACT_OCR   = local.enable_textract_ocr ? "true" : "false"
+      INTAKE_BUCKET_NAME    = aws_s3_bucket.intake_bucket.bucket
+      WORKER_LEASE_SECONDS  = tostring(local.worker_lease_seconds)
+      MAX_RECEIVE_COUNT     = tostring(local.max_receive_count)
     }
   }
 
@@ -420,7 +458,7 @@ resource "aws_lambda_function" "worker" {
 
 resource "aws_lambda_function" "status" {
   function_name    = local.status_lambda_function_name
-  runtime          = "nodejs20.x"
+  runtime          = "nodejs22.x"
   handler          = "status-handler.handler"
   filename         = data.archive_file.lambda_zip.output_path
   source_code_hash = data.archive_file.lambda_zip.output_base64sha256
@@ -457,9 +495,11 @@ resource "aws_cloudwatch_log_group" "status" {
 }
 
 resource "aws_lambda_event_source_mapping" "worker_queue_mapping" {
-  event_source_arn = aws_sqs_queue.screening_jobs.arn
-  function_name    = aws_lambda_function.worker.arn
-  batch_size       = 10
+  event_source_arn        = aws_sqs_queue.screening_jobs.arn
+  function_name           = aws_lambda_function.worker.arn
+  batch_size              = 1
+  function_response_types = ["ReportBatchItemFailures"]
+  depends_on              = [aws_iam_role_policy_attachment.worker_pipeline_access, aws_iam_role_policy_attachment.worker_sqs_execution]
 }
 
 resource "aws_api_gateway_rest_api" "driver_license_api" {
@@ -490,7 +530,7 @@ resource "aws_api_gateway_method" "driver_license_api_method" {
   rest_api_id      = aws_api_gateway_rest_api.driver_license_api.id
   resource_id      = aws_api_gateway_resource.driver_license_api_resource.id
   http_method      = "POST"
-  authorization    = "NONE"
+  authorization    = "AWS_IAM"
   api_key_required = true
 }
 
@@ -507,7 +547,7 @@ resource "aws_api_gateway_method" "submission_status_method" {
   rest_api_id      = aws_api_gateway_rest_api.driver_license_api.id
   resource_id      = aws_api_gateway_resource.submission_id_resource.id
   http_method      = "GET"
-  authorization    = "NONE"
+  authorization    = "AWS_IAM"
   api_key_required = true
 }
 
@@ -541,12 +581,18 @@ resource "aws_api_gateway_deployment" "driver_license_api_deployment" {
 
   triggers = {
     redeployment = sha1(jsonencode({
-      integration        = aws_api_gateway_integration.driver_license_api_integration.id
-      status_integration = aws_api_gateway_integration.submission_status_integration.id
-      method             = aws_api_gateway_method.driver_license_api_method.id
-      status_method      = aws_api_gateway_method.submission_status_method.id
-      resource           = aws_api_gateway_resource.driver_license_api_resource.id
-      status_resource    = aws_api_gateway_resource.submission_id_resource.id
+      integration          = aws_api_gateway_integration.driver_license_api_integration.id
+      status_integration   = aws_api_gateway_integration.submission_status_integration.id
+      method               = aws_api_gateway_method.driver_license_api_method.id
+      status_method        = aws_api_gateway_method.submission_status_method.id
+      resource             = aws_api_gateway_resource.driver_license_api_resource.id
+      status_resource      = aws_api_gateway_resource.submission_id_resource.id
+      intake_authorization = aws_api_gateway_method.driver_license_api_method.authorization
+      status_authorization = aws_api_gateway_method.submission_status_method.authorization
+      intake_api_key       = aws_api_gateway_method.driver_license_api_method.api_key_required
+      status_api_key       = aws_api_gateway_method.submission_status_method.api_key_required
+      intake_uri           = aws_api_gateway_integration.driver_license_api_integration.uri
+      status_uri           = aws_api_gateway_integration.submission_status_integration.uri
     }))
   }
 

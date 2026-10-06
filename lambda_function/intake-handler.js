@@ -1,140 +1,104 @@
 'use strict';
 
-const { randomUUID } = require('node:crypto');
-
 const { S3Client, PutObjectCommand } = require('@aws-sdk/client-s3');
-const { SQSClient, SendMessageCommand } = require('@aws-sdk/client-sqs');
-const { DynamoDBClient } = require('@aws-sdk/client-dynamodb');
-const { DynamoDBDocumentClient, PutCommand } = require('@aws-sdk/lib-dynamodb');
-
+const { SQSClient } = require('@aws-sdk/client-sqs');
+const { PutCommand } = require('@aws-sdk/lib-dynamodb');
 const { jsonResponse, normalizeInvocationEvent } = require('./index');
 const { decodeBase64Document } = require('./storage');
+const { dispatchSubmission } = require('./dispatch');
+const {
+  callerOwner, canonicalJson, conditionalFailure, documentClientFor, getSubmission,
+  httpError, idempotencyKey, publicError, publicStatus, sha256
+} = require('./submissions');
 
 function createIntakeHandler(options = {}) {
   const s3Client = options.s3Client || new S3Client({});
   const sqsClient = options.sqsClient || new SQSClient({});
-  const documentClient = options.documentClient || DynamoDBDocumentClient.from(
-    options.dynamoClient || new DynamoDBClient({})
-  );
+  const documentClient = documentClientFor(options);
   const now = options.now || (() => new Date().toISOString());
-  const createId = options.createId || randomUUID;
   const bucketName = options.bucketName || process.env.INTAKE_BUCKET_NAME;
   const queueUrl = options.queueUrl || process.env.INTAKE_QUEUE_URL;
   const tableName = options.tableName || process.env.SUBMISSION_TABLE_NAME;
   const uploadPrefix = options.uploadPrefix || process.env.UPLOAD_PREFIX || 'uploads';
   const submissionPrefix = options.submissionPrefix || process.env.SUBMISSION_PREFIX || 'submissions';
-  const resultPrefix = options.resultPrefix || process.env.RESULT_PREFIX || 'results';
 
   return async function handler(event = {}) {
     try {
-      if (!bucketName || !queueUrl || !tableName) {
-        throw configurationError('INTAKE_BUCKET_NAME, INTAKE_QUEUE_URL, and SUBMISSION_TABLE_NAME must be configured.');
+      const ownerId = callerOwner(event);
+      const key = idempotencyKey(event);
+      if (!bucketName || !queueUrl || !tableName) throw new Error('Intake configuration is missing.');
+      if (typeof event.body === 'string' && Buffer.byteLength(event.body) > 5 * 1024 * 1024) {
+        throw httpError(413, 'PAYLOAD_TOO_LARGE', 'Request body must not exceed 5 MiB.');
       }
-
       const payload = normalizeInvocationEvent(event);
-      const submissionId = createId();
-      const submittedAt = now();
-      const objectKey = `${submissionPrefix}/${submissionId}.json`;
-      const resultKey = `${resultPrefix}/${submissionId}.json`;
-      let sourceImage = null;
-
-      if (payload.imageBase64) {
-        const decodedImage = decodeBase64Document(payload.imageBase64);
-        const uploadKey = `${uploadPrefix}/${submissionId}.${decodedImage.extension}`;
-
-        await s3Client.send(new PutObjectCommand({
-          Bucket: bucketName,
-          Key: uploadKey,
-          Body: decodedImage.buffer,
-          ContentType: decodedImage.mimeType
-        }));
-
-        sourceImage = {
-          bucket: bucketName,
-          key: uploadKey,
-          mimeType: decodedImage.mimeType
-        };
-      }
-
-      const submissionRecord = {
-        submissionId,
-        submittedAt,
-        payload: {
-          ...payload,
-          imageBase64: undefined
-        },
-        sourceImage
-      };
-
-      await s3Client.send(new PutObjectCommand({
-        Bucket: bucketName,
-        Key: objectKey,
-        Body: JSON.stringify(submissionRecord),
-        ContentType: 'application/json'
-      }));
-
-      await documentClient.send(new PutCommand({
-        TableName: tableName,
-        Item: {
-          submissionId,
-          status: 'queued',
-          submissionType: payload.documentType,
-          submittedAt,
-          submittedDate: submittedAt.slice(0, 10),
-          queue: 'screening',
-          hasImage: Boolean(sourceImage),
-          hasProvidedOcr: Boolean(payload.ocrText),
-          hasBarcodeData: Boolean(payload.barcodeData),
-          stateCodeHint: payload.metadata && payload.metadata.stateCode ? payload.metadata.stateCode : null,
-          sourceImageMimeType: sourceImage ? sourceImage.mimeType : null,
-          submissionBucket: bucketName,
-          submissionKey: objectKey,
-          sourceImageKey: sourceImage ? sourceImage.key : null,
-          resultKey,
-          lastUpdatedAt: submittedAt,
-          processingVersion: '2026-04-12.a'
+      const requestHash = sha256(canonicalJson(payload));
+      const submissionId = sha256(`${ownerId}:${key}`);
+      let item = await getSubmission(documentClient, tableName, submissionId);
+      if (!item) {
+        const submittedAt = now();
+        // Content-addressed, immutable objects keep concurrent requests using
+        // the same key with different payloads from replacing the winner's data.
+        const objectKey = `${submissionPrefix}/${submissionId}/${requestHash}.json`;
+        let sourceImage = null;
+        if (payload.imageBase64) {
+          const decoded = decodeBase64Document(payload.imageBase64);
+          const uploadKey = `${uploadPrefix}/${submissionId}/${requestHash}.${decoded.extension}`;
+          await putImmutable(s3Client, {
+            Bucket: bucketName, Key: uploadKey, Body: decoded.buffer, ContentType: decoded.mimeType
+          });
+          sourceImage = { bucket: bucketName, key: uploadKey, mimeType: decoded.mimeType };
         }
-      }));
-
-      await sqsClient.send(new SendMessageCommand({
-        QueueUrl: queueUrl,
-        MessageBody: JSON.stringify({
-          submissionId,
-          bucket: bucketName,
-          objectKey,
-          resultKey,
-          tableName,
-          sourceImage
-        })
-      }));
-
-      return jsonResponse(202, {
-        submissionId,
-        status: 'queued',
-        submittedAt,
-        queue: 'screening',
-        submissionLocation: `s3://${bucketName}/${objectKey}`,
-        resultLocation: `s3://${bucketName}/${resultKey}`,
-        sourceImageLocation: sourceImage ? `s3://${bucketName}/${sourceImage.key}` : null,
-        statusEndpoint: `/submissions/${submissionId}`
+        await putImmutable(s3Client, {
+          Bucket: bucketName, Key: objectKey,
+          Body: JSON.stringify({ submissionId, payload: { ...payload, imageBase64: undefined }, sourceImage }),
+          ContentType: 'application/json'
+        });
+        item = {
+          submissionId, ownerId, requestHash, status: 'dispatch_pending',
+          submissionType: payload.documentType, submittedAt, lastUpdatedAt: submittedAt,
+          submissionBucket: bucketName, submissionKey: objectKey,
+          sourceImageKey: sourceImage ? sourceImage.key : null,
+          hasImage: Boolean(sourceImage), hasProvidedOcr: Boolean(payload.ocrText),
+          hasBarcodeData: Boolean(payload.barcodeData), processingVersion: '2026-10-06.a'
+        };
+        try {
+          await documentClient.send(new PutCommand({
+            TableName: tableName, Item: item,
+            ConditionExpression: 'attribute_not_exists(submissionId)'
+          }));
+        } catch (error) {
+          if (!conditionalFailure(error)) throw error;
+          item = await getSubmission(documentClient, tableName, submissionId);
+        }
+      }
+      if (!item) throw new Error('Submission could not be read.');
+      if (item.ownerId !== ownerId || item.requestHash !== requestHash) {
+        throw httpError(409, 'IDEMPOTENCY_CONFLICT', 'This Idempotency-Key was already used for a different payload.');
+      }
+      if (item.status === 'dispatch_pending') {
+        try {
+          item = await dispatchSubmission({ documentClient, sqsClient, tableName, queueUrl, submissionId, now }) || item;
+        } catch (error) {
+          // Durable acceptance succeeded. Scheduled reconciliation will retry
+          // dispatch, including ambiguous SQS or DynamoDB responses.
+        }
+      }
+      return jsonResponse(item.status === 'completed' ? 200 : 202, {
+        ...publicStatus(item), statusEndpoint: `/submissions/${submissionId}`
       });
     } catch (error) {
-      const statusCode = error.statusCode || 500;
-
-      return jsonResponse(statusCode, {
-        error: error.message || 'Unable to queue screening request'
-      });
+      const response = publicError(error);
+      return jsonResponse(response.statusCode, response.body);
     }
   };
 }
 
-function configurationError(message) {
-  const error = new Error(message);
-  error.statusCode = 500;
-  return error;
+async function putImmutable(s3Client, input) {
+  try {
+    await s3Client.send(new PutObjectCommand({ ...input, IfNoneMatch: '*' }));
+  } catch (error) {
+    if (error.name !== 'PreconditionFailed' && error.$metadata?.httpStatusCode !== 412) throw error;
+  }
 }
 
-module.exports = {
-  createIntakeHandler,
-  handler: createIntakeHandler()
-};
+module.exports = { createIntakeHandler, handler: createIntakeHandler() };

@@ -6,7 +6,7 @@ This document describes how the asynchronous identity-document screening pipelin
 
 ```text
 Untrusted client
-  -> API Gateway + API key + throttling
+  -> API Gateway + IAM authentication + API key + throttling
   -> Intake Lambda
   -> private S3 objects (submission metadata + uploaded image)
   -> SQS screening queue
@@ -25,9 +25,12 @@ The current infrastructure already encodes several useful safety properties:
 - S3 public access is blocked at the bucket level.
 - S3 objects use server-side encryption with AES-256.
 - Submission and result prefixes have explicit retention periods rather than indefinite storage.
-- API Gateway routes require an API key and are attached to a throttled usage plan.
+- API Gateway routes require IAM-signed requests plus an API key and throttled usage plan.
+- Status access is checked against the immutable caller ownership recorded at intake.
+- Intake keys are idempotent per principal; a scheduled reconciler retries durable pending dispatch.
+- Workers use conditional leases and publish immutable attempt results under a guarded pointer.
 - Screening work is asynchronous through SQS, with a dead-letter queue after repeated failures.
-- Lambda execution is split into intake, worker, and status roles instead of one shared runtime role.
+- Lambda execution is split into intake, worker, status, and reconciliation roles.
 - CloudWatch log retention is configurable rather than implicitly infinite.
 - CloudWatch alarms cover queue age, DLQ depth, Lambda errors, and API Gateway 5xx responses.
 - A Terraform-managed operations dashboard groups request-path failures, Lambda p95 duration, queue health, DLQ depth, and worker invocations/errors/throttles without exposing document payloads.
@@ -94,7 +97,7 @@ These are useful controls, but they do not by themselves make the system suitabl
 
 **Controls / expectations**
 
-- production deployments need caller-level authorization beyond knowledge of a submission ID
+- status lookup requires the same authenticated IAM principal that owns the submission
 - avoid exposing S3 object locations as bearer-style access mechanisms
 - keep retention periods aligned with the actual product need and applicable policy
 
@@ -102,7 +105,7 @@ These are useful controls, but they do not by themselves make the system suitabl
 
 The Terraform configuration currently separates retention policy by prefix:
 
-- submissions: short-lived intake data
+- uploads and submissions: short-lived intake data, including noncurrent-version cleanup
 - results: longer-lived screening output
 - logs: independently configurable CloudWatch retention
 
@@ -184,16 +187,23 @@ Capture the failure mode, detection gap, recovery action, and whether a new auto
 
 Before presenting this as a production identity-verification service, evaluate at least:
 
-- caller authentication and per-submission authorization
+- verify IAM caller policies and per-submission authorization in the deployed environment
 - KMS/customer-managed encryption requirements
 - secrets/API-key lifecycle
 - WAF/request-size protections
 - audit logging that avoids PII leakage
 - deletion/retention policy and regulatory obligations
 - alert routing and escalation policy for the existing CloudWatch alarms
-- idempotency guarantees for retries/redrives
+- exercise implemented idempotency/lease guarantees with deployed retries and redrives
 - dependency failure behavior for Textract
 - formal validation of IAM least privilege
 - request-level tracing for correlating API, Lambda, queue, and worker failures
 
 The repository is strongest when these boundaries are explicit: it demonstrates an asynchronous, testable screening pipeline without overstating what the screening result proves.
+
+## Coordinated rollout
+
+The signed API and minimal queue envelope require a coordinated migration. See
+[reliability and access](RELIABILITY_AND_ACCESS.md) for legacy queue draining,
+ownerless-record handling, forward recovery, and the live AWS verification
+harness. Local tests do not establish that a deployed stack has passed those checks.

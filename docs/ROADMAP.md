@@ -13,22 +13,22 @@ The current system already includes:
 - optional Textract OCR when text is not supplied;
 - driver-license and passport screening paths;
 - PDF417/AAMVA-oriented barcode parsing inputs;
-- API-key protection and API Gateway throttling;
+- IAM-signed API access, per-principal submission ownership, API-key usage controls, and throttling;
+- owner-scoped idempotency, durable pending dispatch reconciliation, conditional worker leases, and immutable attempt results;
 - Terraform-managed AWS infrastructure;
 - unit/smoke validation and documented operations/threat-model guidance.
 
 The next work should therefore deepen reliability, reviewability, and screening evidence rather than re-adding capabilities that already exist.
 
-## Priority 1 — idempotent intake and worker execution
+## Priority 1 — deployed reliability evidence
 
-Define a client-supplied or server-issued idempotency model so retries cannot create duplicate screening jobs accidentally. The worker should be safe under SQS at-least-once delivery and persist a processing/version key before final result publication.
+Idempotent intake, scheduled dispatch recovery, conditional worker leases, and
+SQS partial batch configuration are implemented and covered by application and
+Terraform contract tests. Run the disposable AWS verification harness before a
+production rollout; emulator tests do not prove deployed IAM or DLQ behavior.
 
-Evidence required:
-
-- duplicate intake request test;
-- duplicate SQS delivery test;
-- result-write idempotency test;
-- documented retry behavior for ambiguous client/API failures.
+See [reliability and access](RELIABILITY_AND_ACCESS.md) for the API migration,
+legacy queue drain, ownership model, and live verification commands.
 
 ## Priority 2 — bounded worker failure and redrive operations
 

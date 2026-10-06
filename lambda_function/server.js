@@ -6,6 +6,12 @@ const { handler: intakeHandler } = require('./intake-handler');
 const { handler: statusHandler } = require('./status-handler');
 
 const port = Number(process.env.PORT || 3000);
+// Development-only identity, configured by the operator rather than HTTP input.
+// The local wrapper binds to loopback and is never a production auth gateway.
+const requestContext = process.env.LOCAL_CALLER_ARN ? { identity: {
+  userArn: process.env.LOCAL_CALLER_ARN,
+  caller: 'AIDALOCALDEVELOPMENT'
+} } : {};
 
 const server = http.createServer(async (req, res) => {
   const chunks = [];
@@ -18,19 +24,20 @@ const server = http.createServer(async (req, res) => {
       res.end(response.body);
     } catch (error) {
       res.writeHead(500, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ error: 'Unexpected server error', details: error.message }));
+      res.end(JSON.stringify({ error: 'Unexpected server error' }));
     }
   });
 });
 
 async function routeRequest(req, body) {
   if (req.method === 'POST' && req.url === '/validate-license') {
-    return intakeHandler({ body });
+    return intakeHandler({ body, headers: req.headers, requestContext });
   }
 
   if (req.method === 'GET' && req.url.startsWith('/submissions/')) {
     const submissionId = decodeURIComponent(req.url.replace('/submissions/', ''));
     return statusHandler({
+      requestContext,
       pathParameters: {
         submissionId
       }
@@ -44,7 +51,7 @@ async function routeRequest(req, body) {
   };
 }
 
-server.listen(port, () => {
+server.listen(port, '127.0.0.1', () => {
   const address = server.address();
   const boundPort = address && typeof address === 'object' ? address.port : port;
   console.log(`Driver license screening server listening on port ${boundPort}`);
