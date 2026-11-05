@@ -376,6 +376,18 @@ test("expired lease is reclaimed and a late worker cannot replace the published 
   });
   assert.deepEqual(await h.get(id), winner);
   assert.equal(winner.attemptCount, 2);
+  assert.equal(
+    h.logs.filter((entry) => entry.event === "worker.completed").length,
+    1,
+  );
+  assert.equal(
+    h.logs.filter((entry) => entry.event === "worker.failure_state_unrecorded")
+      .length,
+    1,
+  );
+  const failure = h.logs.find((entry) => entry.event === "worker.failed");
+  assert.equal(failure.stage, "publish_result");
+  assert.equal(failure.status, undefined);
 });
 
 test("expired lease cannot publish even when no replacement worker has arrived", async (t) => {

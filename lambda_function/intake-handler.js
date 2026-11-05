@@ -6,6 +6,7 @@ const { PutCommand } = require("@aws-sdk/lib-dynamodb");
 const { jsonResponse, normalizeInvocationEvent } = require("./index");
 const { decodeBase64Document } = require("./storage");
 const { dispatchSubmission } = require("./dispatch");
+const { createInvocationLog } = require("./observability");
 const {
   callerOwner,
   canonicalJson,
@@ -32,7 +33,8 @@ function createIntakeHandler(options = {}) {
   const submissionPrefix =
     options.submissionPrefix || process.env.SUBMISSION_PREFIX || "submissions";
 
-  return async function handler(event = {}) {
+  return async function handler(event = {}, context = {}) {
+    const log = createInvocationLog(event, context, options.log);
     try {
       const ownerId = callerOwner(event);
       const key = idempotencyKey(event);
@@ -130,18 +132,26 @@ function createIntakeHandler(options = {}) {
               queueUrl,
               submissionId,
               now,
+              log,
             })) || item;
         } catch (error) {
+          log("dispatch.deferred", { submissionId });
           // Durable acceptance succeeded. Scheduled reconciliation will retry
           // dispatch, including ambiguous SQS or DynamoDB responses.
         }
       }
+      log("intake.accepted", {
+        submissionId,
+        status: item.status,
+        statusCode: item.status === "completed" ? 200 : 202,
+      });
       return jsonResponse(item.status === "completed" ? 200 : 202, {
         ...publicStatus(item),
         statusEndpoint: `/submissions/${submissionId}`,
       });
     } catch (error) {
       const response = publicError(error);
+      log("intake.failed", { statusCode: response.statusCode });
       return jsonResponse(response.statusCode, response.body);
     }
   };

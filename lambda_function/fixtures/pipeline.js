@@ -95,6 +95,7 @@ async function harness(t) {
   const objects = new Map();
   const sent = [];
   const reads = [];
+  const logs = [];
   const s3Client = {
     async send(command) {
       const { Key, Body, IfNoneMatch } = command.input;
@@ -121,6 +122,7 @@ async function harness(t) {
   let time = Date.parse("2026-10-06T00:00:00Z");
   const now = () => new Date(time).toISOString();
   const options = {
+    log: (line) => logs.push(JSON.parse(line)),
     documentClient,
     s3Client,
     sqsClient,
@@ -135,6 +137,7 @@ async function harness(t) {
     },
   };
   return {
+    logs,
     objects,
     reads,
     sent,

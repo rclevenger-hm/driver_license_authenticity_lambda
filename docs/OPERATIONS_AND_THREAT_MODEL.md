@@ -132,6 +132,72 @@ At minimum, operators should be able to answer these questions from metrics/logs
 
 Avoid using raw OCR text, names, license numbers, addresses, or document images as routine observability dimensions.
 
+### Request and delivery correlation
+
+The intake, status, reconciler, and worker handlers emit one-line JSON events to
+their existing Lambda log groups. Every event has `service: document-screening`
+and a fixed `event` name. When available, `lambdaRequestId` comes from the Lambda
+invocation context and `apiRequestId` comes from API Gateway's
+`extendedRequestId`. Client headers and API Gateway's overridable `requestId`
+are not used for correlation.
+
+Use `submissionId` to follow an accepted submission across requests and retries.
+`dispatch.sent` records a confirmed SQS send and its `messageId`; worker events
+join that delivery to its Lambda invocation. The queue envelope, durable records,
+and API responses are unchanged. Legacy pending submissions need no migration.
+
+Important event meanings:
+
+- `intake.accepted` includes the returned processing status and HTTP status.
+- `dispatch.deferred` means dispatch did not return successfully. Delivery may
+  already have happened, including after an ambiguous timeout or a failed
+  queued-state write. It does not mean the queue is empty.
+- `worker.claimed` records a successful lease claim. `worker.completed` appears
+  only after the conditional result publication succeeds, not just an S3 upload.
+- `worker.duplicate` identifies a delivery skipped because work already completed.
+- `worker.failed` means the delivery remains in `batchItemFailures`; its `stage`
+  identifies the failed operation. `status` appears only when the failure-state
+  write succeeded. A persisted `failed` status still returns the delivery for
+  SQS retry exhaustion and DLQ handling.
+- `worker.failure_state_unrecorded` means that write failed or the lease was
+  lost. Do not infer that the record was moved to `retrying` or `failed`.
+- `reconcile.failed` identifies a dispatch attempt needing recovery.
+  Its `stage` also distinguishes query and failed-record rotation errors, which
+  retain their existing invocation failure behavior.
+  `reconcile.finished` summarizes the bounded pass when it reaches its normal
+  finish path. `stopReason` distinguishes `exhausted`, `deadline`, and `page_limit`;
+  a bounded pass does not guarantee that all pending work was examined.
+  `dispatched` retains the existing
+  meaning of records observed past `dispatch_pending`, not unique SQS sends.
+- Missing, foreign, ownerless, and malformed status IDs all emit
+  `status.not_found` without a submission ID. Other request failures emit only
+  their HTTP status and available invocation IDs.
+
+Select the four Lambda log groups in CloudWatch Logs Insights and search an
+accepted submission ID:
+
+```text
+fields @timestamp, event, lambdaRequestId, apiRequestId, messageId, status, stage, receiveCount
+| filter service = "document-screening" and submissionId = "<submission ID>"
+| sort @timestamp asc
+```
+
+For request failures before acceptance, filter by `lambdaRequestId` or
+`apiRequestId` instead. These identifiers are operational correlators, not
+authorization tokens or suitable high-cardinality metric dimensions. Restrict
+log access and retain the configured CloudWatch retention policy.
+
+The logger allows only operational IDs, fixed event/status/stage values, and
+numeric counts. It omits document content, analysis results, caller identities,
+idempotency keys, object locations, lease tokens, and raw exception messages,
+names, and codes. Logging failures do not change processing or retry behavior.
+
+These application events do not enable API Gateway access logging or X-Ray.
+They also do not change alarms: partial-batch failures and deferred intake
+dispatch can return successfully without incrementing Lambda `Errors`.
+Production validation of log delivery, access control, retention, and alert
+coverage remains necessary in an approved disposable AWS deployment.
+
 ### Operations dashboard
 
 Terraform provisions `${api_gateway_name}-${stage_name}-operations` as a low-cardinality CloudWatch dashboard for first-response triage. It deliberately uses infrastructure metrics rather than document-derived dimensions:
