@@ -10,6 +10,7 @@ const { UpdateCommand } = require("@aws-sdk/lib-dynamodb");
 const { parseAamvaBarcode } = require("./barcode");
 const { analyzeDocument, normalizePayload } = require("./screening");
 const { createOcrExtractor } = require("./ocr");
+const { createInvocationLog } = require("./observability");
 const {
   conditionalFailure,
   documentClientFor,
@@ -39,13 +40,19 @@ function createWorkerHandler(options = {}) {
   );
   const epoch = () => Math.floor(Date.parse(now()) / 1000);
 
-  return async function handler(event = {}) {
+  return async function handler(event = {}, context = {}) {
+    const log = createInvocationLog(event, context, options.log);
     if (!tableName || !bucketName)
       throw new Error("Worker configuration is missing.");
     const failures = [];
     for (const record of event.Records || []) {
       let submissionId;
       let leaseToken;
+      let stage = "validate_message";
+      const delivery = {
+        messageId: record.messageId || record.messageID,
+        receiveCount: Number(record.attributes?.ApproximateReceiveCount || 1),
+      };
       try {
         const message = parseJson(record.body, "Invalid queue message.");
         if (
@@ -56,11 +63,16 @@ function createWorkerHandler(options = {}) {
           throw new Error("Invalid submission ID.");
         }
         submissionId = message.submissionId;
+        stage = "read_submission";
         let item = await getSubmission(documentClient, tableName, submissionId);
         if (!item || !item.ownerId || item.submissionBucket !== bucketName)
           throw new Error("Unknown submission.");
-        if (item.status === "completed") continue;
+        if (item.status === "completed") {
+          log("worker.duplicate", { submissionId, ...delivery });
+          continue;
+        }
         const candidateToken = createToken();
+        stage = "claim";
         try {
           const claimed = await documentClient.send(
             new UpdateCommand({
@@ -89,6 +101,7 @@ function createWorkerHandler(options = {}) {
           );
           item = claimed.Attributes;
           leaseToken = candidateToken;
+          log("worker.claimed", { submissionId, ...delivery });
         } catch (error) {
           if (conditionalFailure(error)) {
             const current = await getSubmission(
@@ -96,11 +109,15 @@ function createWorkerHandler(options = {}) {
               tableName,
               submissionId,
             );
-            if (current && current.status === "completed") continue;
+            if (current && current.status === "completed") {
+              log("worker.duplicate", { submissionId, ...delivery });
+              continue;
+            }
           }
           throw error;
         }
         // Locations come exclusively from the durable record, not SQS input.
+        stage = "load_submission";
         const object = await s3Client.send(
           new GetObjectCommand({ Bucket: bucketName, Key: item.submissionKey }),
         );
@@ -114,6 +131,7 @@ function createWorkerHandler(options = {}) {
         const parsedBarcode = parseAamvaBarcode(payload.barcodeData);
         let extractedOcr = null;
         if (item.sourceImageKey) {
+          stage = "load_image";
           const imageObject = await s3Client.send(
             new GetObjectCommand({
               Bucket: bucketName,
@@ -123,6 +141,7 @@ function createWorkerHandler(options = {}) {
           const imageBytes = await bodyToBuffer(imageObject.Body);
           payload.imageBase64 = imageBytes.toString("base64");
           if (!payload.ocrText) {
+            stage = "ocr";
             extractedOcr = await ocrExtractor.extractText(imageBytes);
             if (extractedOcr.text) payload.ocrText = extractedOcr.text;
           }
@@ -137,11 +156,13 @@ function createWorkerHandler(options = {}) {
               payload.metadata?.stateCode || parsedBarcode.fields.state || null,
           };
         }
+        stage = "analyze";
         const analysis = analyzeDocument(normalizePayload(payload));
         const processedAt = now();
         // Every attempt has its own immutable object. Only a current lease may
         // publish its pointer; a late worker cannot overwrite a newer result.
         const resultKey = `${resultPrefix}/${submissionId}/${leaseToken}.json`;
+        stage = "store_result";
         await s3Client.send(
           new PutObjectCommand({
             Bucket: bucketName,
@@ -163,6 +184,7 @@ function createWorkerHandler(options = {}) {
             }),
           }),
         );
+        stage = "publish_result";
         await documentClient.send(
           new UpdateCommand({
             TableName: tableName,
@@ -188,7 +210,9 @@ function createWorkerHandler(options = {}) {
             },
           }),
         );
+        log("worker.completed", { submissionId, ...delivery });
       } catch (error) {
+        let status;
         if (submissionId && leaseToken) {
           try {
             const lastAttempt =
@@ -213,10 +237,16 @@ function createWorkerHandler(options = {}) {
                 },
               }),
             );
+            status = lastAttempt ? "failed" : "retrying";
           } catch (statusError) {
+            log("worker.failure_state_unrecorded", {
+              submissionId,
+              ...delivery,
+            });
             // Preserve retry even if the state update fails or the lease was lost.
           }
         }
+        log("worker.failed", { submissionId, ...delivery, status, stage });
         failures.push({ itemIdentifier: record.messageId || record.messageID });
       }
     }

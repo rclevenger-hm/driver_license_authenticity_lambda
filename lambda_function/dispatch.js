@@ -11,18 +11,20 @@ async function dispatchSubmission({
   queueUrl,
   submissionId,
   now,
+  log = () => {},
 }) {
   const item = await getSubmission(documentClient, tableName, submissionId);
   if (!item || item.status !== "dispatch_pending") return item;
 
   // DynamoDB is the durable dispatch record. A timeout after SendMessage can
   // cause duplicate delivery, which the worker's conditional lease tolerates.
-  await sqsClient.send(
+  const sent = await sqsClient.send(
     new SendMessageCommand({
       QueueUrl: queueUrl,
       MessageBody: JSON.stringify({ submissionId }),
     }),
   );
+  log("dispatch.sent", { submissionId, messageId: sent?.MessageId });
   try {
     const response = await documentClient.send(
       new UpdateCommand({
